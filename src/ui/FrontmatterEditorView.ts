@@ -1,7 +1,6 @@
 import {
   ItemView,
   Notice,
-  TFile,
   WorkspaceLeaf,
 } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
@@ -13,7 +12,7 @@ import type {
   PropertyStat,
 } from "../types";
 import { FILTER_OPERATORS } from "../types";
-import { applyFilters } from "../services/FilterEngine";
+import { applyFilters, evaluateFilter } from "../services/FilterEngine";
 import { SetActionModal } from "./modals/SetActionModal";
 import { DeleteActionModal } from "./modals/DeleteActionModal";
 import { TransformActionModal } from "./modals/TransformActionModal";
@@ -21,22 +20,32 @@ import { SnapshotsModal } from "./modals/SnapshotsModal";
 
 export const VIEW_TYPE_FRONTMATTER_EDITOR = "frontmatter-editor-view";
 
-const MAX_VISIBLE_COLUMNS = 4;
 const MAX_VISIBLE_ROWS = 500;
+const DEFAULT_COLUMN_COUNT = 4;
+
+interface ColumnState {
+  property: string;
+  sort: "asc" | "desc" | null;
+  filter: Filter | null;
+}
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
 export class FrontmatterEditorView extends ItemView {
-  private filters: Filter[] = [];
+  private globalFilters: Filter[] = [];
   private combinator: FilterCombinator = "AND";
   private inventory: PropertyStat[] = [];
   private allRows: NoteRow[] = [];
   private filteredRows: NoteRow[] = [];
   private selectedPaths = new Set<string>();
-  private propertyFilter = "";
-  private visibleColumns: string[] = [];
+  private propertySearch = "";
+  private columns: ColumnState[] = [];
+  private dragSourceIndex: number | null = null;
+  private openFilterPopoverFor: string | null = null;
+
+  private actionHintEl: HTMLElement | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -71,33 +80,58 @@ export class FrontmatterEditorView extends ItemView {
     const scan = this.plugin.scanner.scan();
     this.inventory = scan.properties;
     this.allRows = this.plugin.scanner.buildAllRows();
+    if (this.columns.length === 0) {
+      this.columns = this.suggestColumns();
+    } else {
+      this.columns = this.columns.filter((c) =>
+        this.inventory.some((p) => p.name === c.property),
+      );
+    }
     this.recomputeFilteredRows();
   }
 
+  private suggestColumns(): ColumnState[] {
+    return this.inventory
+      .slice(0, DEFAULT_COLUMN_COUNT)
+      .map((p) => ({ property: p.name, sort: null, filter: null }));
+  }
+
+  private activeFilters(): Filter[] {
+    const perCol = this.columns
+      .map((c) => c.filter)
+      .filter((f): f is Filter => !!f);
+    return perCol;
+  }
+
   private recomputeFilteredRows(): void {
-    this.filteredRows = applyFilters(this.allRows, this.filters, this.combinator);
-    if (this.visibleColumns.length === 0) {
-      this.visibleColumns = this.suggestColumns();
+    let rows = applyFilters(this.allRows, this.globalFilters, this.combinator);
+    const perCol = this.activeFilters();
+    if (perCol.length > 0) {
+      rows = rows.filter((row) =>
+        perCol.every((f) => evaluateFilter(f, row)),
+      );
     }
+
+    const sortCols = this.columns.filter((c) => c.sort !== null);
+    if (sortCols.length > 0) {
+      rows = rows.slice().sort((a, b) => {
+        for (const col of sortCols) {
+          const cmp = compareValues(
+            a.frontmatter[col.property],
+            b.frontmatter[col.property],
+          );
+          if (cmp !== 0) return col.sort === "asc" ? cmp : -cmp;
+        }
+        return a.path.localeCompare(b.path);
+      });
+    }
+
+    this.filteredRows = rows;
     this.selectedPaths = new Set(
       Array.from(this.selectedPaths).filter((p) =>
         this.filteredRows.some((r) => r.path === p),
       ),
     );
-  }
-
-  private suggestColumns(): string[] {
-    const used = new Set<string>();
-    for (const f of this.filters) used.add(f.property);
-    const sorted = this.inventory
-      .slice()
-      .sort((a, b) => b.count - a.count)
-      .map((p) => p.name);
-    for (const name of sorted) {
-      if (used.size >= MAX_VISIBLE_COLUMNS) break;
-      used.add(name);
-    }
-    return Array.from(used).slice(0, MAX_VISIBLE_COLUMNS);
   }
 
   private render(): void {
@@ -130,20 +164,33 @@ export class FrontmatterEditorView extends ItemView {
         void this.refreshScan().then(() => this.render());
       }).open();
     });
+    this.button(toolbar, "Reset columns", () => {
+      this.columns = this.suggestColumns();
+      this.recomputeFilteredRows();
+      this.render();
+    });
   }
 
   private renderSidebar(parent: HTMLElement): void {
     const sidebar = parent.createDiv({ cls: "fm-editor-sidebar" });
-    sidebar.createEl("h3", { text: "Properties", cls: "fm-editor-section-title" });
+    const head = sidebar.createDiv({ cls: "fm-editor-sidebar-head" });
+    head.createEl("h3", {
+      text: "Properties",
+      cls: "fm-editor-section-title",
+    });
+    head.createSpan({
+      text: `${this.columns.length} shown`,
+      cls: "fm-editor-empty-hint",
+    });
 
     const search = sidebar.createEl("input", {
       type: "text",
       cls: "fm-editor-prop-search",
       placeholder: "Filter property names...",
     });
-    search.value = this.propertyFilter;
+    search.value = this.propertySearch;
     search.addEventListener("input", () => {
-      this.propertyFilter = search.value;
+      this.propertySearch = search.value;
       this.renderInventory(list);
     });
 
@@ -153,31 +200,58 @@ export class FrontmatterEditorView extends ItemView {
 
   private renderInventory(container: HTMLElement): void {
     container.empty();
-    const needle = this.propertyFilter.trim().toLowerCase();
+    const needle = this.propertySearch.trim().toLowerCase();
     const items = needle
       ? this.inventory.filter((p) => p.name.toLowerCase().includes(needle))
       : this.inventory;
-    for (const prop of items) {
-      const row = container.createDiv({ cls: "fm-editor-prop-item" });
-      const nameEl = row.createDiv({ cls: "fm-editor-prop-name" });
-      nameEl.setText(prop.name);
-      const countEl = row.createDiv({ cls: "fm-editor-prop-count" });
-      countEl.setText(String(prop.count));
-      row.title = `Types: ${Array.from(prop.types).join(", ")}\nSamples:\n  ${prop.sampleValues.slice(0, 4).join("\n  ")}`;
-      row.addEventListener("click", () => {
-        this.addFilter({
-          id: uid(),
-          property: prop.name,
-          operator: "exists",
-        });
-      });
-    }
+
     if (items.length === 0) {
       container.createDiv({
         text: "No properties match the filter.",
         cls: "fm-editor-empty-hint",
       });
+      return;
     }
+
+    const visible = new Set(this.columns.map((c) => c.property));
+
+    for (const prop of items) {
+      const row = container.createDiv({ cls: "fm-editor-prop-item" });
+      const cb = row.createEl("input", {
+        type: "checkbox",
+        cls: "fm-editor-prop-check",
+      });
+      cb.checked = visible.has(prop.name);
+      cb.addEventListener("click", (ev) => ev.stopPropagation());
+      cb.addEventListener("change", () => {
+        this.toggleColumn(prop.name, cb.checked);
+      });
+
+      const nameWrap = row.createDiv({ cls: "fm-editor-prop-name-wrap" });
+      const nameEl = nameWrap.createDiv({ cls: "fm-editor-prop-name" });
+      nameEl.setText(prop.name);
+      const typesEl = nameWrap.createDiv({ cls: "fm-editor-prop-types" });
+      typesEl.setText(Array.from(prop.types).join(" / "));
+
+      const countEl = row.createDiv({ cls: "fm-editor-prop-count" });
+      countEl.setText(String(prop.count));
+
+      row.title = `Samples:\n  ${prop.sampleValues.slice(0, 6).join("\n  ")}`;
+      row.addEventListener("click", () => {
+        this.toggleColumn(prop.name, !visible.has(prop.name));
+      });
+    }
+  }
+
+  private toggleColumn(property: string, on: boolean): void {
+    const idx = this.columns.findIndex((c) => c.property === property);
+    if (on && idx === -1) {
+      this.columns.push({ property, sort: null, filter: null });
+    } else if (!on && idx >= 0) {
+      this.columns.splice(idx, 1);
+    }
+    this.recomputeFilteredRows();
+    this.render();
   }
 
   private renderRightPane(parent: HTMLElement): void {
@@ -190,7 +264,10 @@ export class FrontmatterEditorView extends ItemView {
   private renderFilterBar(parent: HTMLElement): void {
     const bar = parent.createDiv({ cls: "fm-editor-filter-bar" });
     const head = bar.createDiv({ cls: "fm-editor-filter-head" });
-    head.createSpan({ text: "Filters", cls: "fm-editor-section-title" });
+    head.createSpan({
+      text: "Global filters",
+      cls: "fm-editor-section-title",
+    });
 
     const combo = head.createEl("select", { cls: "fm-editor-combo" });
     for (const opt of ["AND", "OR"] as const) {
@@ -204,35 +281,36 @@ export class FrontmatterEditorView extends ItemView {
     });
 
     this.button(head, "+ Add filter", () => {
-      this.addFilter({
+      this.globalFilters.push({
         id: uid(),
         property: this.inventory[0]?.name ?? "",
         operator: "exists",
       });
+      this.recomputeFilteredRows();
+      this.render();
     });
-
     this.button(head, "Clear", () => {
-      this.filters = [];
+      this.globalFilters = [];
+      for (const c of this.columns) c.filter = null;
       this.recomputeFilteredRows();
       this.render();
     });
 
     const chips = bar.createDiv({ cls: "fm-editor-chip-list" });
-    if (this.filters.length === 0) {
+    if (this.globalFilters.length === 0) {
       chips.createSpan({
-        text: "No filters -- all notes with frontmatter shown",
+        text: "No global filters. Per-column filters can be added via the funnel icon in the table headers.",
         cls: "fm-editor-empty-hint",
       });
-      return;
-    }
-    for (const f of this.filters) {
-      this.renderFilterChip(chips, f);
+    } else {
+      for (const f of this.globalFilters) {
+        this.renderGlobalChip(chips, f);
+      }
     }
   }
 
-  private renderFilterChip(parent: HTMLElement, filter: Filter): void {
+  private renderGlobalChip(parent: HTMLElement, filter: Filter): void {
     const chip = parent.createDiv({ cls: "fm-editor-chip" });
-
     const propSelect = chip.createEl("select", { cls: "fm-editor-chip-prop" });
     const props = this.inventory.map((p) => p.name);
     if (!props.includes(filter.property) && filter.property) {
@@ -291,7 +369,7 @@ export class FrontmatterEditorView extends ItemView {
       cls: "fm-editor-chip-remove",
     });
     remove.addEventListener("click", () => {
-      this.filters = this.filters.filter((x) => x.id !== filter.id);
+      this.globalFilters = this.globalFilters.filter((x) => x.id !== filter.id);
       this.recomputeFilteredRows();
       this.render();
     });
@@ -300,10 +378,16 @@ export class FrontmatterEditorView extends ItemView {
   private renderResultsTable(parent: HTMLElement): void {
     const box = parent.createDiv({ cls: "fm-editor-results-box" });
     const head = box.createDiv({ cls: "fm-editor-results-head" });
+
+    const activeFilterCount = this.activeFilters().length;
     head.createSpan({
-      text: `Results: ${this.filteredRows.length} note${this.filteredRows.length === 1 ? "" : "s"}`,
+      text: `Results: ${this.filteredRows.length} note${this.filteredRows.length === 1 ? "" : "s"}` +
+        (activeFilterCount > 0
+          ? ` (${activeFilterCount} per-column filter${activeFilterCount === 1 ? "" : "s"} active)`
+          : ""),
       cls: "fm-editor-section-title",
     });
+
     const allSelected =
       this.filteredRows.length > 0 &&
       this.filteredRows.every((r) => this.selectedPaths.has(r.path));
@@ -320,35 +404,18 @@ export class FrontmatterEditorView extends ItemView {
       this.render();
     });
 
-    const colPicker = head.createEl("button", {
-      text: "Columns...",
-      cls: "fm-editor-btn",
-    });
-    colPicker.addEventListener("click", () => {
-      const allProps = this.inventory.map((p) => p.name);
-      const next = window.prompt(
-        "Visible property columns (comma-separated, in display order):",
-        this.visibleColumns.join(", "),
-      );
-      if (next === null) return;
-      const wanted = next
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-        .filter((s) => allProps.includes(s));
-      this.visibleColumns = wanted;
-      this.render();
-    });
-
     const tableWrap = box.createDiv({ cls: "fm-editor-table-wrap" });
     const table = tableWrap.createEl("table", { cls: "fm-editor-table" });
     const thead = table.createEl("thead");
     const headRow = thead.createEl("tr");
     headRow.createEl("th", { text: "", cls: "fm-editor-col-check" });
-    headRow.createEl("th", { text: "Note" });
-    for (const col of this.visibleColumns) {
-      headRow.createEl("th", { text: col });
-    }
+
+    const noteTh = headRow.createEl("th", { cls: "fm-editor-col-note-head" });
+    noteTh.createSpan({ text: "Note" });
+
+    this.columns.forEach((col, index) => {
+      this.renderColumnHeader(headRow, col, index);
+    });
 
     const tbody = table.createEl("tbody");
     const shown = this.filteredRows.slice(0, MAX_VISIBLE_ROWS);
@@ -371,12 +438,18 @@ export class FrontmatterEditorView extends ItemView {
       link.title = row.path;
       link.addEventListener("click", (ev) => {
         ev.preventDefault();
-        void this.app.workspace.openLinkText(row.path, "", ev.metaKey || ev.ctrlKey);
+        void this.app.workspace.openLinkText(
+          row.path,
+          "",
+          ev.metaKey || ev.ctrlKey,
+        );
       });
 
-      for (const col of this.visibleColumns) {
+      for (const col of this.columns) {
         const td = tr.createEl("td", { cls: "fm-editor-col-val" });
-        td.setText(formatValue(row.frontmatter[col]));
+        renderCell(td, row.frontmatter[col.property], (linkText) => {
+          void this.app.workspace.openLinkText(linkText, row.path, false);
+        });
       }
     }
 
@@ -388,18 +461,187 @@ export class FrontmatterEditorView extends ItemView {
     }
   }
 
-  private actionBarEl: HTMLElement | null = null;
-  private actionHintEl: HTMLElement | null = null;
+  private renderColumnHeader(
+    headRow: HTMLElement,
+    col: ColumnState,
+    index: number,
+  ): void {
+    const th = headRow.createEl("th", { cls: "fm-editor-col-head" });
+    th.dataset.colIndex = String(index);
+    th.setAttr("draggable", "true");
+
+    if (col.sort !== null) th.addClass("fm-editor-col-sorted");
+    if (col.filter) th.addClass("fm-editor-col-filtered");
+
+    th.addEventListener("dragstart", (ev) => {
+      this.dragSourceIndex = index;
+      ev.dataTransfer?.setData("text/plain", String(index));
+      th.addClass("fm-editor-col-dragging");
+    });
+    th.addEventListener("dragend", () => {
+      th.removeClass("fm-editor-col-dragging");
+      this.dragSourceIndex = null;
+    });
+    th.addEventListener("dragover", (ev) => {
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+      th.addClass("fm-editor-col-drop-target");
+    });
+    th.addEventListener("dragleave", () => {
+      th.removeClass("fm-editor-col-drop-target");
+    });
+    th.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      th.removeClass("fm-editor-col-drop-target");
+      const src = this.dragSourceIndex;
+      if (src === null || src === index) return;
+      const moved = this.columns.splice(src, 1)[0];
+      this.columns.splice(index, 0, moved);
+      this.dragSourceIndex = null;
+      this.recomputeFilteredRows();
+      this.render();
+    });
+
+    const labelWrap = th.createDiv({ cls: "fm-editor-col-head-label" });
+    const nameEl = labelWrap.createSpan({
+      text: col.property,
+      cls: "fm-editor-col-head-name",
+    });
+    nameEl.title = "Click to sort, drag to reorder";
+    nameEl.addEventListener("click", () => {
+      this.cycleSort(col);
+    });
+
+    const indicator = labelWrap.createSpan({ cls: "fm-editor-col-sort-ind" });
+    if (col.sort === "asc") indicator.setText(" ▲");
+    else if (col.sort === "desc") indicator.setText(" ▼");
+
+    const actions = th.createDiv({ cls: "fm-editor-col-head-actions" });
+    const filterBtn = actions.createEl("button", {
+      cls: "fm-editor-col-icon-btn",
+      text: col.filter ? "*" : "f",
+    });
+    filterBtn.title = col.filter ? "Edit column filter" : "Filter this column";
+    filterBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      this.openFilterPopoverFor =
+        this.openFilterPopoverFor === col.property ? null : col.property;
+      this.render();
+    });
+
+    const removeBtn = actions.createEl("button", {
+      cls: "fm-editor-col-icon-btn",
+      text: "x",
+    });
+    removeBtn.title = "Hide this column";
+    removeBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      this.columns.splice(index, 1);
+      this.recomputeFilteredRows();
+      this.render();
+    });
+
+    if (this.openFilterPopoverFor === col.property) {
+      this.renderColumnFilterPopover(th, col);
+    }
+  }
+
+  private renderColumnFilterPopover(parent: HTMLElement, col: ColumnState): void {
+    const pop = parent.createDiv({ cls: "fm-editor-col-popover" });
+    pop.addEventListener("click", (ev) => ev.stopPropagation());
+
+    const filter: Filter = col.filter ?? {
+      id: uid(),
+      property: col.property,
+      operator: "exists",
+    };
+
+    const opRow = pop.createDiv({ cls: "fm-editor-popover-row" });
+    opRow.createEl("label", { text: "Operator" });
+    const opSel = opRow.createEl("select");
+    for (const op of FILTER_OPERATORS) {
+      const o = opSel.createEl("option", { value: op, text: humanOp(op) });
+      if (op === filter.operator) o.selected = true;
+    }
+    opSel.addEventListener("change", () => {
+      filter.operator = opSel.value as FilterOperator;
+      filter.property = col.property;
+      col.filter = filter;
+      this.recomputeFilteredRows();
+      this.render();
+    });
+
+    if (operatorNeedsValue(filter.operator)) {
+      const valRow = pop.createDiv({ cls: "fm-editor-popover-row" });
+      valRow.createEl("label", { text: "Value" });
+      const valInput = valRow.createEl("input", {
+        type: "text",
+        placeholder: "value",
+      });
+      valInput.value = filter.value ?? "";
+      const apply = () => {
+        filter.value = valInput.value;
+        filter.property = col.property;
+        col.filter = filter;
+        this.recomputeFilteredRows();
+        this.render();
+      };
+      valInput.addEventListener("change", apply);
+      valInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          apply();
+        }
+      });
+      window.setTimeout(() => valInput.focus(), 0);
+    }
+
+    const csRow = pop.createDiv({ cls: "fm-editor-popover-row" });
+    const csLabel = csRow.createEl("label", { cls: "fm-editor-chip-cs" });
+    const csInput = csLabel.createEl("input", { type: "checkbox" });
+    csInput.checked = !!filter.caseSensitive;
+    csLabel.appendText("Case sensitive");
+    csInput.addEventListener("change", () => {
+      filter.caseSensitive = csInput.checked;
+      col.filter = filter;
+      this.recomputeFilteredRows();
+      this.render();
+    });
+
+    const actions = pop.createDiv({ cls: "fm-editor-popover-actions" });
+    const clearBtn = actions.createEl("button", {
+      text: "Clear",
+      cls: "fm-editor-btn",
+    });
+    clearBtn.addEventListener("click", () => {
+      col.filter = null;
+      this.openFilterPopoverFor = null;
+      this.recomputeFilteredRows();
+      this.render();
+    });
+    const closeBtn = actions.createEl("button", {
+      text: "Close",
+      cls: "fm-editor-btn fm-editor-btn-primary",
+    });
+    closeBtn.addEventListener("click", () => {
+      this.openFilterPopoverFor = null;
+      this.render();
+    });
+  }
+
+  private cycleSort(col: ColumnState): void {
+    if (col.sort === null) col.sort = "asc";
+    else if (col.sort === "asc") col.sort = "desc";
+    else col.sort = null;
+    this.recomputeFilteredRows();
+    this.render();
+  }
 
   private renderActionBar(parent: HTMLElement): void {
     const bar = parent.createDiv({ cls: "fm-editor-action-bar" });
-    this.actionBarEl = bar;
-
     this.actionHintEl = bar.createDiv({ cls: "fm-editor-action-hint" });
     this.updateActionBarHint();
 
     const buttons = bar.createDiv({ cls: "fm-editor-action-buttons" });
-
     this.button(buttons, "Set property...", () => this.openSetModal(), {
       primary: true,
     });
@@ -476,12 +718,6 @@ export class FrontmatterEditorView extends ItemView {
     ).open();
   }
 
-  private addFilter(filter: Filter): void {
-    this.filters.push(filter);
-    this.recomputeFilteredRows();
-    this.render();
-  }
-
   private button(
     parent: HTMLElement,
     label: string,
@@ -546,10 +782,84 @@ function humanOp(op: FilterOperator): string {
   }
 }
 
-function formatValue(v: unknown): string {
-  if (v === undefined) return "";
-  if (v === null) return "null";
-  if (Array.isArray(v)) return v.map((x) => String(x)).join(", ");
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
+function compareValues(a: unknown, b: unknown): number {
+  const aMissing = a === undefined || a === null;
+  const bMissing = b === undefined || b === null;
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "boolean" && typeof b === "boolean") {
+    return a === b ? 0 : a ? 1 : -1;
+  }
+  const as = Array.isArray(a) ? a.join(", ") : String(a);
+  const bs = Array.isArray(b) ? b.join(", ") : String(b);
+  return as.localeCompare(bs, undefined, { numeric: true });
+}
+
+const WIKILINK_RE = /^\[\[([^\]]+)\]\]$/;
+
+function renderCell(
+  td: HTMLElement,
+  value: unknown,
+  openLink: (target: string) => void,
+): void {
+  if (value === undefined) {
+    td.addClass("fm-editor-cell-missing");
+    return;
+  }
+  if (value === null) {
+    td.addClass("fm-editor-cell-null");
+    td.setText("null");
+    return;
+  }
+  if (typeof value === "boolean") {
+    td.addClass(value ? "fm-editor-cell-true" : "fm-editor-cell-false");
+    td.setText(value ? "true" : "false");
+    return;
+  }
+  if (typeof value === "number") {
+    td.addClass("fm-editor-cell-num");
+    td.setText(String(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    td.addClass("fm-editor-cell-list");
+    const list = td.createDiv({ cls: "fm-editor-pills" });
+    for (const item of value) {
+      const pill = list.createSpan({ cls: "fm-editor-pill" });
+      const s = typeof item === "string" ? item : String(item);
+      const wl = s.match(WIKILINK_RE);
+      if (wl) {
+        pill.addClass("fm-editor-pill-link");
+        const link = pill.createEl("a", { text: wl[1] });
+        link.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          openLink(wl[1]);
+        });
+      } else {
+        pill.setText(s);
+      }
+    }
+    return;
+  }
+  if (typeof value === "object") {
+    td.addClass("fm-editor-cell-obj");
+    td.setText(JSON.stringify(value));
+    return;
+  }
+  const s = String(value);
+  const wl = s.match(WIKILINK_RE);
+  if (wl) {
+    const link = td.createEl("a", {
+      text: wl[1],
+      cls: "fm-editor-note-link",
+    });
+    link.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      openLink(wl[1]);
+    });
+    return;
+  }
+  td.setText(s);
 }

@@ -72,10 +72,16 @@
   padding: 4px;
 }
 
+.fm-editor-sidebar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
 .fm-editor-prop-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 6px;
   padding: 4px 6px;
   border-radius: 3px;
   cursor: pointer;
@@ -85,6 +91,15 @@
   background: var(--background-modifier-hover);
 }
 
+.fm-editor-prop-check {
+  flex-shrink: 0;
+}
+
+.fm-editor-prop-name-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
 .fm-editor-prop-name {
   font-family: var(--font-monospace);
   overflow: hidden;
@@ -92,9 +107,17 @@
   white-space: nowrap;
 }
 
+.fm-editor-prop-types {
+  color: var(--text-faint);
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .fm-editor-prop-count {
   color: var(--text-muted);
   margin-left: 8px;
+  font-variant-numeric: tabular-nums;
 }
 
 .fm-editor-right {
@@ -229,8 +252,178 @@
   font-family: var(--font-monospace);
   max-width: 280px;
   overflow: hidden;
+  vertical-align: top;
+}
+
+.fm-editor-col-head {
+  position: relative;
+  user-select: none;
+  cursor: grab;
+}
+
+.fm-editor-col-head.fm-editor-col-dragging {
+  opacity: 0.4;
+}
+
+.fm-editor-col-head.fm-editor-col-drop-target {
+  background: var(--background-modifier-hover);
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+.fm-editor-col-head.fm-editor-col-sorted .fm-editor-col-head-name {
+  color: var(--interactive-accent);
+}
+
+.fm-editor-col-head.fm-editor-col-filtered .fm-editor-col-head {
+  background: var(--background-modifier-active-hover);
+}
+
+.fm-editor-col-head-label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.fm-editor-col-head-name {
+  font-weight: 600;
+}
+
+.fm-editor-col-sort-ind {
+  color: var(--interactive-accent);
+  font-size: 0.9em;
+  margin-left: 2px;
+}
+
+.fm-editor-col-head-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+  opacity: 0.4;
+}
+
+.fm-editor-col-head:hover .fm-editor-col-head-actions,
+.fm-editor-col-head.fm-editor-col-filtered .fm-editor-col-head-actions {
+  opacity: 1;
+}
+
+.fm-editor-col-icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-monospace);
+  font-size: 0.85em;
+  padding: 0 4px;
+  line-height: 1.3;
+}
+
+.fm-editor-col-icon-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.fm-editor-col-popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 10px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: default;
+}
+
+.fm-editor-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fm-editor-popover-row label {
+  width: 70px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.fm-editor-popover-row input,
+.fm-editor-popover-row select {
+  flex: 1;
+  padding: 3px 6px;
+}
+
+.fm-editor-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.fm-editor-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.fm-editor-pill {
+  display: inline-block;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  padding: 0 6px;
+  font-family: var(--font-interface);
+  font-size: 0.85em;
+  max-width: 180px;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.fm-editor-pill-link {
+  background: var(--background-modifier-active-hover);
+  border-color: var(--interactive-accent);
+}
+
+.fm-editor-pill-link a {
+  color: var(--text-accent);
+  cursor: pointer;
+}
+
+.fm-editor-cell-missing::before {
+  content: "—";
+  color: var(--text-faint);
+}
+
+.fm-editor-cell-null {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.fm-editor-cell-true {
+  color: var(--text-success);
+}
+
+.fm-editor-cell-false {
+  color: var(--text-muted);
+}
+
+.fm-editor-cell-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fm-editor-cell-obj {
+  color: var(--text-muted);
+  font-size: 0.85em;
 }
 
 .fm-editor-note-link {
