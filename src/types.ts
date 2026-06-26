@@ -69,6 +69,7 @@ export interface SetAction {
   value: FmValue;
   mode: "overwrite" | "skip_if_exists" | "merge_list";
   template?: boolean;
+  wrapWikilink?: boolean;
 }
 
 export interface DeleteAction {
@@ -78,23 +79,26 @@ export interface DeleteAction {
 
 export interface RenameAction {
   type: "rename";
-  fromProperty: string;
+  fromProperties: string[];
   toProperty: string;
   onConflict: "skip" | "overwrite" | "merge_list";
+  wrapWikilink?: boolean;
 }
 
 export interface CopyAction {
   type: "copy";
-  fromProperty: string;
+  fromProperties: string[];
   toProperty: string;
   onConflict: "skip" | "overwrite" | "merge_list";
+  wrapWikilink?: boolean;
 }
 
 export interface MoveAction {
   type: "move";
-  fromProperty: string;
+  fromProperties: string[];
   toProperty: string;
   onConflict: "skip" | "overwrite" | "merge_list";
+  wrapWikilink?: boolean;
 }
 
 export type BulkAction =

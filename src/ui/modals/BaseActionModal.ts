@@ -105,12 +105,39 @@ export abstract class BaseActionModal extends Modal {
       result.errorCount > 0 ? `${result.errorCount} errors` : null,
     ].filter(Boolean);
     const summary = parts.join(", ");
-    new Notice(`Frontmatter Editor: ${summary}`);
+    this.showUndoableNotice(summary, result.snapshotId ?? null);
     if (result.errors.length > 0) {
       console.warn("frontmatter-editor: errors", result.errors);
     }
     this.setStatus(`Done. ${summary}. Snapshot: ${result.snapshotId ?? "n/a"}`);
     this.onDone();
+  }
+
+  private showUndoableNotice(summary: string, snapshotId: string | null): void {
+    const duration = snapshotId ? 12_000 : 4_000;
+    const notice = new Notice("", duration);
+    const el = notice.noticeEl ?? notice.containerEl;
+    el.empty();
+    el.createSpan({ text: `Frontmatter Editor: ${summary}` });
+    if (!snapshotId) return;
+    const undoBtn = el.createEl("button", {
+      text: " Undo",
+      cls: "fm-editor-notice-undo",
+    });
+    undoBtn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      notice.hide();
+      const snap = await this.plugin.snapshots.get(snapshotId);
+      if (!snap) {
+        new Notice("Snapshot not found.");
+        return;
+      }
+      const undoResult = await this.plugin.bulk.restoreSnapshot(snap);
+      new Notice(
+        `Undo: ${undoResult.successCount} restored, ${undoResult.errorCount} errors`,
+      );
+      this.onDone();
+    });
   }
 
   protected setStatus(text: string): void {

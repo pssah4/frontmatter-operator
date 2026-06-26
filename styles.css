@@ -574,6 +574,74 @@
   flex: 1;
 }
 
+.fm-editor-checkbox-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.fm-editor-multi-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.fm-editor-multi-source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 22px;
+  padding: 4px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 3px;
+  background: var(--background-secondary);
+}
+
+.fm-editor-multi-source-chips .fm-editor-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fm-editor-multi-source-chips .fm-editor-chip-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.9em;
+}
+
+.fm-editor-multi-source-add {
+  display: flex;
+  gap: 6px;
+}
+
+.fm-editor-multi-source-add input {
+  flex: 1;
+  padding: 3px 6px;
+}
+
+.fm-editor-notice-undo {
+  background: transparent;
+  border: 1px solid var(--text-on-accent);
+  color: var(--text-on-accent);
+  border-radius: 3px;
+  padding: 1px 8px;
+  margin-left: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.fm-editor-notice-undo:hover {
+  background: var(--text-on-accent);
+  color: var(--interactive-accent);
+}
+
 .fm-editor-btn {
   border: 1px solid var(--background-modifier-border);
   background: var(--interactive-normal);

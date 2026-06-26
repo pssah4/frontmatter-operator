@@ -121,6 +121,18 @@ export function splitList(raw: string): string[] {
   return items;
 }
 
+export function wrapAsWikilink(value: FmValue): FmValue {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => wrapAsWikilink(item) as never) as FmValue;
+  }
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return value;
+  if (trimmed.startsWith("[[") && trimmed.endsWith("]]")) return value;
+  return `[[${trimmed}]]`;
+}
+
 export function mergeListValues(a: FmValue, b: FmValue): FmValue {
   const left = Array.isArray(a) ? a : a === undefined || a === null ? [] : [a];
   const right = Array.isArray(b) ? b : b === undefined || b === null ? [] : [b];

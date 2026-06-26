@@ -136,7 +136,7 @@ describe("applyActionPure", () => {
         { Beschreibung: "[[Note]]" },
         {
           type: "rename",
-          fromProperty: "Beschreibung",
+          fromProperties: ["Beschreibung"],
           toProperty: "description",
           onConflict: "skip",
         },
@@ -150,7 +150,7 @@ describe("applyActionPure", () => {
         { Beschreibung: ["[[A]]", "[[B]]"] },
         {
           type: "rename",
-          fromProperty: "Beschreibung",
+          fromProperties: ["Beschreibung"],
           toProperty: "description",
           onConflict: "skip",
         },
@@ -163,7 +163,7 @@ describe("applyActionPure", () => {
         { from: "x" },
         {
           type: "copy",
-          fromProperty: "from",
+          fromProperties: ["from"],
           toProperty: "to",
           onConflict: "skip",
         },
@@ -177,7 +177,7 @@ describe("applyActionPure", () => {
         { from: "x", to: "y" },
         {
           type: "rename",
-          fromProperty: "from",
+          fromProperties: ["from"],
           toProperty: "to",
           onConflict: "skip",
         },
@@ -192,7 +192,7 @@ describe("applyActionPure", () => {
         { from: "x", to: "y" },
         {
           type: "move",
-          fromProperty: "from",
+          fromProperties: ["from"],
           toProperty: "to",
           onConflict: "overwrite",
         },
@@ -206,7 +206,7 @@ describe("applyActionPure", () => {
         { from: ["c", "d"], to: ["a", "b"] },
         {
           type: "copy",
-          fromProperty: "from",
+          fromProperties: ["from"],
           toProperty: "to",
           onConflict: "merge_list",
         },
@@ -220,12 +220,132 @@ describe("applyActionPure", () => {
         { foo: 1 },
         {
           type: "rename",
-          fromProperty: "missing",
+          fromProperties: ["missing"],
           toProperty: "target",
           onConflict: "skip",
         },
       );
       expect(out.changed).toBe(false);
+    });
+  });
+
+  describe("multi-source rename / copy / move", () => {
+    it("rename merges three sources into one target and deletes sources", () => {
+      const out = applyActionPure(
+        { Beschreibung: "alt-de", Description: "alt-en", descr: "alt-old" },
+        {
+          type: "rename",
+          fromProperties: ["Beschreibung", "Description", "descr"],
+          toProperty: "description",
+          onConflict: "skip",
+        },
+      );
+      expect(out.after.description).toEqual(["alt-de", "alt-en", "alt-old"]);
+      expect(out.after.Beschreibung).toBeUndefined();
+      expect(out.after.Description).toBeUndefined();
+      expect(out.after.descr).toBeUndefined();
+    });
+
+    it("copy multi-source keeps all sources", () => {
+      const out = applyActionPure(
+        { Vorname: "Anna", Nachname: "Doe" },
+        {
+          type: "copy",
+          fromProperties: ["Vorname", "Nachname"],
+          toProperty: "names",
+          onConflict: "skip",
+        },
+      );
+      expect(out.after.names).toEqual(["Anna", "Doe"]);
+      expect(out.after.Vorname).toBe("Anna");
+      expect(out.after.Nachname).toBe("Doe");
+    });
+
+    it("merges lists across sources without duplicates", () => {
+      const out = applyActionPure(
+        { tagsDe: ["a", "b"], tagsEn: ["b", "c"] },
+        {
+          type: "move",
+          fromProperties: ["tagsDe", "tagsEn"],
+          toProperty: "tags",
+          onConflict: "skip",
+        },
+      );
+      expect(out.after.tags).toEqual(["a", "b", "c"]);
+      expect(out.after.tagsDe).toBeUndefined();
+      expect(out.after.tagsEn).toBeUndefined();
+    });
+
+    it("skips when none of the sources exist", () => {
+      const out = applyActionPure(
+        { other: 1 },
+        {
+          type: "rename",
+          fromProperties: ["missing1", "missing2"],
+          toProperty: "target",
+          onConflict: "skip",
+        },
+      );
+      expect(out.changed).toBe(false);
+    });
+  });
+
+  describe("wikilink wrapping", () => {
+    it("wraps a plain string into [[...]]", () => {
+      const out = applyActionPure(
+        {},
+        {
+          type: "set",
+          property: "moc",
+          value: "Reise",
+          mode: "overwrite",
+          wrapWikilink: true,
+        },
+      );
+      expect(out.after.moc).toBe("[[Reise]]");
+    });
+
+    it("keeps existing wikilink as-is", () => {
+      const out = applyActionPure(
+        {},
+        {
+          type: "set",
+          property: "moc",
+          value: "[[Reise]]",
+          mode: "overwrite",
+          wrapWikilink: true,
+        },
+      );
+      expect(out.after.moc).toBe("[[Reise]]");
+    });
+
+    it("wraps list items", () => {
+      const out = applyActionPure(
+        { Vorname: "Anna", Nachname: "Doe" },
+        {
+          type: "copy",
+          fromProperties: ["Vorname", "Nachname"],
+          toProperty: "namesLinked",
+          onConflict: "skip",
+          wrapWikilink: true,
+        },
+      );
+      expect(out.after.namesLinked).toEqual(["[[Anna]]", "[[Doe]]"]);
+    });
+
+    it("wraps template-resolved value", () => {
+      const out = applyActionPure(
+        { Thema: "Reise" },
+        {
+          type: "set",
+          property: "moc",
+          value: "{{Thema}}",
+          mode: "overwrite",
+          template: true,
+          wrapWikilink: true,
+        },
+      );
+      expect(out.after.moc).toBe("[[Reise]]");
     });
   });
 });

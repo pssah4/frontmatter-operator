@@ -3,11 +3,16 @@ import type {
   ActionPreview,
   ActionResult,
   BulkAction,
+  FmValue,
   Frontmatter,
   NoteRow,
   Snapshot,
 } from "../types";
-import { mergeListValues, resolveTemplate } from "./ValueCoercion";
+import {
+  mergeListValues,
+  resolveTemplate,
+  wrapAsWikilink,
+} from "./ValueCoercion";
 import type { SnapshotService } from "./SnapshotService";
 
 function cloneFrontmatter(fm: Frontmatter): Frontmatter {
@@ -43,13 +48,14 @@ export function applyActionPure(
           skipped: "template resolves to empty",
         };
       }
+      const coerced = action.wrapWikilink ? wrapAsWikilink(resolved) : resolved;
       if (exists && action.mode === "merge_list") {
         after[action.property] = mergeListValues(
           after[action.property],
-          resolved,
+          coerced,
         );
       } else {
-        after[action.property] = resolved;
+        after[action.property] = coerced;
       }
       return {
         after,
@@ -69,34 +75,42 @@ export function applyActionPure(
     case "rename":
     case "copy":
     case "move": {
-      const fromExists = Object.prototype.hasOwnProperty.call(
-        after,
-        action.fromProperty,
+      const sourceProps = action.fromProperties.filter((p) =>
+        Object.prototype.hasOwnProperty.call(after, p),
       );
-      if (!fromExists) {
-        return { after, changed: false, skipped: "source property absent" };
+      if (sourceProps.length === 0) {
+        return { after, changed: false, skipped: "no source property present" };
       }
-      const fromValue = after[action.fromProperty];
+
+      const collected = sourceProps.map((p) => after[p]);
+      let merged: FmValue =
+        collected.length === 1
+          ? collected[0]
+          : collected.reduce(
+              (acc, v) => mergeListValues(acc, v),
+              [] as FmValue,
+            );
+
+      if (action.wrapWikilink) merged = wrapAsWikilink(merged);
+
       const targetExists = Object.prototype.hasOwnProperty.call(
         after,
         action.toProperty,
       );
-
-      let nextValue = fromValue;
       if (targetExists && !isEmpty(after[action.toProperty])) {
         if (action.onConflict === "skip") {
           return { after, changed: false, skipped: "target property exists" };
         }
         if (action.onConflict === "merge_list") {
-          nextValue = mergeListValues(after[action.toProperty], fromValue);
+          merged = mergeListValues(after[action.toProperty], merged);
         }
       }
 
-      after[action.toProperty] = nextValue;
+      after[action.toProperty] = merged;
 
-      if (action.type === "rename" || action.type === "move") {
-        if (action.fromProperty !== action.toProperty) {
-          delete after[action.fromProperty];
+      if (action.type !== "copy") {
+        for (const p of sourceProps) {
+          if (p !== action.toProperty) delete after[p];
         }
       }
       return { after, changed: true };
@@ -242,13 +256,16 @@ export class BulkActionService {
             ? resolveTemplate(action.value, fm as never)
             : action.value;
           if (action.template && (resolved === null || resolved === "")) return;
+          const coerced = action.wrapWikilink
+            ? wrapAsWikilink(resolved as FmValue)
+            : resolved;
           if (exists && action.mode === "merge_list") {
             fm[action.property] = mergeListValues(
               fm[action.property] as never,
-              resolved,
+              coerced as FmValue,
             );
           } else {
-            fm[action.property] = resolved;
+            fm[action.property] = coerced;
           }
           return;
         }
@@ -261,30 +278,38 @@ export class BulkActionService {
         case "rename":
         case "copy":
         case "move": {
-          const fromExists = Object.prototype.hasOwnProperty.call(
-            fm,
-            action.fromProperty,
+          const sourceProps = action.fromProperties.filter((p) =>
+            Object.prototype.hasOwnProperty.call(fm, p),
           );
-          if (!fromExists) return;
-          const fromValue = fm[action.fromProperty];
+          if (sourceProps.length === 0) return;
+          const collected = sourceProps.map((p) => fm[p]);
+          let merged: FmValue =
+            collected.length === 1
+              ? (collected[0] as FmValue)
+              : (collected.reduce(
+                  (acc, v) => mergeListValues(acc as FmValue, v as FmValue),
+                  [] as FmValue,
+                ) as FmValue);
+          if (action.wrapWikilink) merged = wrapAsWikilink(merged);
+
           const targetExists = Object.prototype.hasOwnProperty.call(
             fm,
             action.toProperty,
           );
-
-          let nextValue: unknown = fromValue;
           if (targetExists && !isEmpty(fm[action.toProperty])) {
             if (action.onConflict === "skip") return;
             if (action.onConflict === "merge_list") {
-              nextValue = mergeListValues(
-                fm[action.toProperty] as never,
-                fromValue as never,
+              merged = mergeListValues(
+                fm[action.toProperty] as FmValue,
+                merged,
               );
             }
           }
-          fm[action.toProperty] = nextValue;
-          if (action.type !== "copy" && action.fromProperty !== action.toProperty) {
-            delete fm[action.fromProperty];
+          fm[action.toProperty] = merged;
+          if (action.type !== "copy") {
+            for (const p of sourceProps) {
+              if (p !== action.toProperty) delete fm[p];
+            }
           }
           return;
         }

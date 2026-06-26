@@ -195,6 +195,15 @@ export class FrontmatterEditorView extends ItemView {
         this.render();
       },
     );
+    const undoBtn = this.iconButton(
+      right,
+      "Undo last",
+      "Restore the most recent snapshot",
+    );
+    undoBtn.addEventListener("click", async () => {
+      await this.undoLastAction();
+    });
+
     this.iconButton(right, "Snapshots", "Open snapshot manager").addEventListener(
       "click",
       () => {
@@ -206,6 +215,28 @@ export class FrontmatterEditorView extends ItemView {
     this.iconButton(right, "?", "How to use").addEventListener("click", () => {
       new HelpModal(this.app).open();
     });
+  }
+
+  private async undoLastAction(): Promise<void> {
+    const snaps = await this.plugin.snapshots.list();
+    if (snaps.length === 0) {
+      new Notice("No snapshot to undo.");
+      return;
+    }
+    const latest = snaps[0];
+    if (
+      !confirm(
+        `Restore ${latest.entries.length} note(s) from snapshot ${latest.id}?`,
+      )
+    ) {
+      return;
+    }
+    const result = await this.plugin.bulk.restoreSnapshot(latest);
+    new Notice(
+      `Undo: ${result.successCount} restored, ${result.errorCount} errors`,
+    );
+    await this.refreshScan();
+    this.render();
   }
 
   private openPropertyPicker(anchor: HTMLElement): void {

@@ -93,7 +93,12 @@ function describeAction(action: Snapshot["action"]): string {
       return `delete ${action.property}`;
     case "rename":
     case "copy":
-    case "move":
-      return `${action.type} ${action.fromProperty} -> ${action.toProperty} (${action.onConflict})`;
+    case "move": {
+      const legacy = (action as { fromProperty?: string }).fromProperty;
+      const sources = action.fromProperties
+        ? action.fromProperties.join(" + ")
+        : (legacy ?? "?");
+      return `${action.type} ${sources} -> ${action.toProperty} (${action.onConflict})`;
+    }
   }
 }

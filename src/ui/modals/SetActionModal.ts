@@ -30,6 +30,7 @@ export class SetActionModal extends BaseActionModal {
   private rawValue = "";
   private kind: ValueKind = "auto";
   private mode: "overwrite" | "skip_if_exists" | "merge_list" = "overwrite";
+  private wrapWikilink = false;
   private hintEl: HTMLElement | null = null;
   private chipsEl: HTMLElement | null = null;
   private valueInput: HTMLInputElement | null = null;
@@ -84,6 +85,18 @@ export class SetActionModal extends BaseActionModal {
     }
     modeSel.addEventListener("change", () => {
       this.mode = modeSel.value as typeof this.mode;
+    });
+
+    const wlRow = container.createDiv({ cls: "fm-editor-modal-row" });
+    wlRow.createEl("label", { text: "Wrap as wikilink" });
+    const wlLabel = wlRow.createEl("label", {
+      cls: "fm-editor-checkbox-line",
+    });
+    const wlCheck = wlLabel.createEl("input", { type: "checkbox" });
+    wlCheck.checked = this.wrapWikilink;
+    wlLabel.appendText(" Convert the resolved value to [[wikilink]] if not already");
+    wlCheck.addEventListener("change", () => {
+      this.wrapWikilink = wlCheck.checked;
     });
 
     this.hintEl = container.createDiv({
@@ -150,6 +163,7 @@ export class SetActionModal extends BaseActionModal {
         value: this.rawValue,
         mode: this.mode,
         template: true,
+        wrapWikilink: this.wrapWikilink,
       };
     }
     const value = parseValue(this.rawValue, this.kind);
@@ -158,6 +172,7 @@ export class SetActionModal extends BaseActionModal {
       property,
       value,
       mode: this.mode,
+      wrapWikilink: this.wrapWikilink,
     };
   }
 }
