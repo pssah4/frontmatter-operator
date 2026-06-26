@@ -172,9 +172,175 @@ export class FrontmatterEditorView extends ItemView {
     root.addClass("fm-editor-content");
 
     this.renderToolbar(root);
-    this.renderWhenBar(root);
-    this.renderTableSection(root);
-    this.renderActionBar(root);
+
+    const mainRow = root.createDiv({ cls: "fm-editor-main-row" });
+    this.renderFlowRail(mainRow);
+    const mainStack = mainRow.createDiv({ cls: "fm-editor-main-stack" });
+
+    this.renderWhenBar(mainStack);
+    this.renderTableSection(mainStack);
+    this.renderActionBar(mainStack);
+  }
+
+  // ============================================================ FLOW RAIL
+
+  private renderFlowRail(parent: HTMLElement): void {
+    const rail = parent.createDiv({ cls: "fm-editor-rail" });
+    rail.setAttribute("role", "navigation");
+    rail.setAttribute("aria-label", "Rule flow");
+
+    const whenCount = this.globalFilters.length;
+    const filterCount =
+      this.activeColumnFilters().length + (this.notePathFilter ? 1 : 0);
+    const matchedCount = this.filteredRows.length;
+    const explicitSelection = this.selectedPaths.size > 0;
+    const targetCount = explicitSelection
+      ? this.selectedPaths.size
+      : matchedCount;
+
+    this.renderRailCard(rail, {
+      id: "when",
+      icon: "filter",
+      label: "WHEN",
+      badge: whenCount === 0 ? "—" : String(whenCount),
+      sub: whenCount === 0
+        ? "optional"
+        : whenCount === 1
+          ? "1 condition"
+          : `${whenCount} conditions`,
+      active: whenCount > 0,
+      optional: true,
+      onClick: () => this.scrollToSelector(".fm-editor-when-section"),
+      title: "Global conditions (optional). Click to focus the WHEN section.",
+    });
+
+    this.renderRailConnector(rail, whenCount > 0 || filterCount > 0);
+
+    this.renderRailCard(rail, {
+      id: "filter",
+      icon: "table-2",
+      label: "FILTER",
+      badge: filterCount === 0 ? "—" : String(filterCount),
+      sub: filterCount === 0
+        ? "optional"
+        : filterCount === 1
+          ? "1 column"
+          : `${filterCount} columns`,
+      active: filterCount > 0,
+      optional: true,
+      onClick: () => this.scrollToSelector(".fm-editor-table-section"),
+      title:
+        "Per-column quick filters (optional). Use either WHEN or FILTER or both — they combine with AND.",
+    });
+
+    this.renderRailConnector(rail, matchedCount > 0);
+    this.renderRailMergeHint(rail);
+
+    this.renderRailCard(rail, {
+      id: "matched",
+      icon: "check-circle-2",
+      label: "MATCHED",
+      badge: String(targetCount),
+      sub: explicitSelection
+        ? `${targetCount} ticked`
+        : matchedCount === this.allRows.length
+          ? "all notes"
+          : "from rule",
+      isResult: true,
+      active: matchedCount > 0,
+      onClick: () => this.scrollToSelector(".fm-editor-table-section"),
+      title: "The notes the action will run on.",
+    });
+
+    this.renderRailConnector(rail, targetCount > 0);
+
+    this.renderRailCard(rail, {
+      id: "then",
+      icon: "play",
+      label: "THEN",
+      badge: targetCount > 0 ? "pick" : "—",
+      sub: targetCount > 0 ? "pick an action" : "no notes match",
+      active: targetCount > 0,
+      disabled: targetCount === 0,
+      pulse: targetCount > 0,
+      onClick: () => this.scrollToSelector(".fm-editor-action-bar"),
+      title: "Pick a bulk action to apply to the matched notes.",
+    });
+  }
+
+  private renderRailCard(
+    parent: HTMLElement,
+    opts: {
+      id: string;
+      icon: string;
+      label: string;
+      badge: string;
+      sub: string;
+      active?: boolean;
+      optional?: boolean;
+      isResult?: boolean;
+      disabled?: boolean;
+      pulse?: boolean;
+      title?: string;
+      onClick: () => void;
+    },
+  ): void {
+    const card = parent.createDiv({
+      cls: `fm-editor-rail-card is-step-${opts.id}`,
+    });
+    if (opts.active) card.addClass("is-active");
+    if (opts.optional && !opts.active) card.addClass("is-empty");
+    if (opts.isResult) card.addClass("is-result");
+    if (opts.disabled) card.addClass("is-disabled");
+    if (opts.pulse) card.addClass("is-pulse");
+    if (opts.title) card.title = opts.title;
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", opts.disabled ? "-1" : "0");
+
+    const iconWrap = card.createSpan({ cls: "fm-editor-rail-icon" });
+    setIcon(iconWrap, opts.icon);
+
+    const body = card.createDiv({ cls: "fm-editor-rail-body" });
+    body.createSpan({ cls: "fm-editor-rail-label", text: opts.label });
+    body.createSpan({ cls: "fm-editor-rail-sub", text: opts.sub });
+
+    card.createSpan({ cls: "fm-editor-rail-badge", text: opts.badge });
+    card.createSpan({ cls: "fm-editor-rail-dot" });
+
+    if (!opts.disabled) {
+      card.addEventListener("click", () => opts.onClick());
+      card.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          opts.onClick();
+        }
+      });
+    }
+  }
+
+  private renderRailConnector(parent: HTMLElement, active: boolean): void {
+    const connector = parent.createSpan({
+      cls: "fm-editor-rail-connector",
+    });
+    if (active) connector.addClass("is-active");
+    setIcon(connector, "chevron-down");
+  }
+
+  private renderRailMergeHint(parent: HTMLElement): void {
+    const hint = parent.createDiv({ cls: "fm-editor-rail-merge-hint" });
+    hint.createSpan({
+      cls: "fm-editor-rail-merge-glyph",
+      text: "AND",
+    });
+    hint.title = "WHEN conditions and FILTER columns are combined with AND.";
+  }
+
+  private scrollToSelector(selector: string): void {
+    const root = this.containerEl.children[1] as HTMLElement;
+    const el = root.querySelector(selector) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   // ============================================================ TOOLBAR
@@ -357,7 +523,7 @@ export class FrontmatterEditorView extends ItemView {
     if (this.globalFilters.length === 0) {
       const hint = list.createDiv({ cls: "fm-editor-condition-empty" });
       hint.setText(
-        "No global conditions. Add one above, or type into a column filter row in the table below. Without conditions, every note matches.",
+        "No global conditions yet — that's fine. You can also (only) use the per-column filter row in the table below, or leave everything empty to match every note in the vault.",
       );
     } else {
       this.globalFilters.forEach((f, idx) => {

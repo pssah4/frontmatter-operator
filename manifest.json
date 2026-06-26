@@ -3,7 +3,7 @@
   "name": "Frontmatter Editor",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Filter notes by frontmatter properties and apply bulk edits: set, delete, rename, copy and move values across the whole vault.",
+  "description": "Bulk-edit YAML frontmatter across the vault. Filter notes by property conditions, then set, delete, rename, copy or merge properties. Every action is snapshotted and undoable. Exposes a typed programmatic API (`app.plugins.plugins['frontmatter-editor'].api`) and 8 commands (set-property, delete-properties, rename-property, copy-property, merge-properties, undo-last, open-snapshots, list-properties) so agents and scripts can use it without the UI.",
   "author": "Sebastian Hanke",
   "authorUrl": "https://github.com/pssah4",
   "isDesktopOnly": false
