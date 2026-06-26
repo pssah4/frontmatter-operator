@@ -308,16 +308,25 @@ export class FrontmatterEditorView extends ItemView {
   // ============================================================ WHEN BAR
 
   private renderWhenBar(parent: HTMLElement): void {
-    const section = parent.createDiv({ cls: "fm-editor-section" });
+    const section = parent.createDiv({ cls: "fm-editor-section fm-editor-when-section" });
     const head = section.createDiv({ cls: "fm-editor-section-head" });
-    head.createSpan({
+
+    const labelBlock = head.createDiv({ cls: "fm-editor-section-label-block" });
+    labelBlock.createSpan({
       text: "WHEN",
       cls: "fm-editor-section-label",
     });
+    labelBlock.createSpan({
+      text: "filter the notes to act on",
+      cls: "fm-editor-section-sublabel",
+    });
+
     this.ruleSummaryEl = head.createDiv({ cls: "fm-editor-rule-summary" });
     this.updateRuleSummary();
 
-    const addBtn = head.createEl("button", {
+    const actions = head.createDiv({ cls: "fm-editor-section-actions" });
+
+    const addBtn = actions.createEl("button", {
       cls: "fm-editor-add-condition",
     });
     const addIcon = addBtn.createSpan({ cls: "fm-editor-menu-icon" });
@@ -333,20 +342,14 @@ export class FrontmatterEditorView extends ItemView {
       this.render();
     });
 
-    if (this.globalFilters.length > 0 || this.activeColumnFilters().length > 0) {
-      const clearBtn = this.makeIconButton(
-        head,
-        "filter-x",
-        "Clear all conditions",
-        () => {
-          this.globalFilters = [];
-          for (const c of this.columns) c.filter = null;
-          this.notePathFilter = "";
-          this.recomputeFilteredRows();
-          this.render();
-        },
-      );
-      clearBtn.addClass("mod-warning");
+    if (this.globalFilters.length > 0 || this.activeColumnFilters().length > 0 || this.notePathFilter) {
+      this.makeIconButton(actions, "filter-x", "Clear all conditions", () => {
+        this.globalFilters = [];
+        for (const c of this.columns) c.filter = null;
+        this.notePathFilter = "";
+        this.recomputeFilteredRows();
+        this.render();
+      });
     }
 
     const bar = section.createDiv({ cls: "fm-editor-filter-bar" });
@@ -354,7 +357,7 @@ export class FrontmatterEditorView extends ItemView {
     if (this.globalFilters.length === 0) {
       const hint = list.createDiv({ cls: "fm-editor-condition-empty" });
       hint.setText(
-        "No conditions yet. Add one above, or type in the column filter rows in the table below.",
+        "No global conditions. Add one above, or type into a column filter row in the table below. Without conditions, every note matches.",
       );
     } else {
       this.globalFilters.forEach((f, idx) => {
@@ -1116,47 +1119,79 @@ export class FrontmatterEditorView extends ItemView {
   private renderActionBar(parent: HTMLElement): void {
     const bar = parent.createDiv({ cls: "fm-editor-action-bar" });
 
-    const meta = bar.createDiv({ cls: "fm-editor-action-meta" });
-    meta.createSpan({
+    const head = bar.createDiv({ cls: "fm-editor-action-head" });
+    const label = head.createDiv({ cls: "fm-editor-action-label-block" });
+    label.createSpan({
       cls: "fm-editor-action-meta-label",
       text: "THEN",
     });
-    this.actionHintEl = meta.createDiv({ cls: "fm-editor-action-meta-hint" });
+    label.createSpan({
+      cls: "fm-editor-section-sublabel",
+      text: "apply one action",
+    });
+
+    this.actionHintEl = head.createDiv({ cls: "fm-editor-action-meta-hint" });
     this.updateActionBarHint();
 
     const buttons = bar.createDiv({ cls: "fm-editor-action-buttons" });
 
-    const setBtn = buttons.createEl("button", {
-      cls: "fm-editor-btn mod-cta",
-    });
-    setIcon(setBtn.createSpan(), "file-plus");
-    setBtn.createSpan({ text: "Set property" });
-    setBtn.title = "Write a value into a property on every matched note";
+    const setBtn = this.makeActionButton(
+      buttons,
+      "file-plus",
+      "Set property",
+      "Write a value into a property on every matched note",
+    );
     setBtn.addEventListener("click", () => this.openSetModal());
 
-    const renameBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
-    setIcon(renameBtn.createSpan(), "pen-line");
-    renameBtn.createSpan({ text: "Rename" });
-    renameBtn.title = "Change a property's name (1 → 1)";
+    const renameBtn = this.makeActionButton(
+      buttons,
+      "pen-line",
+      "Rename",
+      "Change a property's name (1 → 1)",
+    );
     renameBtn.addEventListener("click", () => this.openRenameModal());
 
-    const copyBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
-    setIcon(copyBtn.createSpan(), "copy");
-    copyBtn.createSpan({ text: "Copy" });
-    copyBtn.title = "Copy values from one or more properties into a target (sources kept)";
+    const copyBtn = this.makeActionButton(
+      buttons,
+      "copy",
+      "Copy",
+      "Copy values from one or more properties into a target (sources kept)",
+    );
     copyBtn.addEventListener("click", () => this.openCopyModal());
 
-    const mergeBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
-    setIcon(mergeBtn.createSpan(), "git-merge");
-    mergeBtn.createSpan({ text: "Merge" });
-    mergeBtn.title = "Combine several properties into one and delete the sources";
+    const mergeBtn = this.makeActionButton(
+      buttons,
+      "git-merge",
+      "Merge",
+      "Combine several properties into one and delete the sources",
+    );
     mergeBtn.addEventListener("click", () => this.openMergeModal());
 
-    const delBtn = buttons.createEl("button", { cls: "fm-editor-btn mod-warning" });
-    setIcon(delBtn.createSpan(), "trash-2");
-    delBtn.createSpan({ text: "Delete properties" });
-    delBtn.title = "Remove one or more properties entirely (key + value)";
+    const delBtn = this.makeActionButton(
+      buttons,
+      "trash-2",
+      "Delete properties",
+      "Remove one or more properties entirely (key + value)",
+    );
+    delBtn.addClass("fm-editor-btn-destructive");
     delBtn.addEventListener("click", () => this.openDeleteModal());
+  }
+
+  private makeActionButton(
+    parent: HTMLElement,
+    icon: string,
+    label: string,
+    title: string,
+  ): HTMLButtonElement {
+    const btn = parent.createEl("button", { cls: "fm-editor-action-btn" });
+    const iconWrap = btn.createSpan({ cls: "fm-editor-action-btn-icon" });
+    setIcon(iconWrap, icon);
+    btn.createSpan({
+      cls: "fm-editor-action-btn-label",
+      text: label,
+    });
+    btn.title = title;
+    return btn;
   }
 
   private getTargetRows(): NoteRow[] {
@@ -1169,14 +1204,19 @@ export class FrontmatterEditorView extends ItemView {
     this.actionHintEl.empty();
     const targets = this.getTargetRows();
     const explicit = this.selectedPaths.size > 0;
+    const arrow = this.actionHintEl.createSpan({
+      cls: "fm-editor-action-meta-arrow",
+    });
+    setIcon(arrow, "corner-down-right");
+    this.actionHintEl.appendText(" runs on ");
     this.actionHintEl.createSpan({
       cls: "fm-editor-action-meta-count",
-      text: `${targets.length}`,
+      text: `${targets.length} ${targets.length === 1 ? "note" : "notes"}`,
     });
     this.actionHintEl.appendText(
       explicit
-        ? ` ${targets.length === 1 ? "note" : "notes"} selected — the action will run on this selection.`
-        : ` ${targets.length === 1 ? "note" : "notes"} matched — the action will run on every matched note.`,
+        ? " currently ticked in the table."
+        : " currently matched by the WHEN conditions.",
     );
   }
 

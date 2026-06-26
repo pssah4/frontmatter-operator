@@ -73,17 +73,41 @@
 .fm-editor-section-head {
   display: flex;
   align-items: center;
-  gap: var(--size-4-2);
+  gap: var(--size-4-3);
   flex-wrap: wrap;
-  padding: var(--size-4-2) var(--size-4-3) var(--size-2-2);
+  padding: var(--size-4-3) var(--size-4-3) var(--size-2-2);
+}
+
+.fm-editor-section-label-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .fm-editor-section-label {
   font-size: var(--font-ui-smaller);
   font-weight: var(--font-bold);
   letter-spacing: 0.08em;
-  color: var(--text-faint);
+  color: var(--interactive-accent);
   text-transform: uppercase;
+}
+
+.fm-editor-section-sublabel {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.fm-editor-section-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  flex-shrink: 0;
+}
+
+.fm-editor-when-section {
+  border-bottom: 2px solid var(--background-modifier-border);
 }
 
 .fm-editor-rule-summary {
@@ -613,20 +637,25 @@
 /* ---------------------------------------------------------------- THEN BAR */
 
 .fm-editor-action-bar {
-  border-top: 1px solid var(--background-modifier-border);
-  padding: var(--size-4-3);
+  border-top: 2px solid var(--background-modifier-border);
+  padding: var(--size-4-3) var(--size-4-3) var(--size-4-3);
   background: var(--background-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.fm-editor-action-head {
   display: flex;
   align-items: center;
   gap: var(--size-4-3);
   flex-wrap: wrap;
 }
 
-.fm-editor-action-meta {
-  flex: 1;
+.fm-editor-action-label-block {
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-1);
+  gap: 2px;
   min-width: 0;
 }
 
@@ -634,13 +663,24 @@
   font-size: var(--font-ui-smaller);
   font-weight: var(--font-bold);
   letter-spacing: 0.08em;
-  color: var(--text-faint);
+  color: var(--interactive-accent);
   text-transform: uppercase;
 }
 
 .fm-editor-action-meta-hint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+  min-width: 0;
+}
+
+.fm-editor-action-meta-arrow {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-faint);
 }
 
 .fm-editor-action-meta-count {
@@ -649,10 +689,62 @@
 }
 
 .fm-editor-action-buttons {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: var(--size-2-2);
-  flex-wrap: wrap;
+  width: 100%;
+}
+
+.fm-editor-action-btn {
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-2-3) var(--size-4-2);
+  cursor: pointer;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  gap: var(--size-2-2);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  min-height: 38px;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.fm-editor-action-btn:hover {
+  background: var(--interactive-hover);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.fm-editor-action-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.fm-editor-action-btn:hover .fm-editor-action-btn-icon {
+  color: var(--text-normal);
+}
+
+.fm-editor-action-btn-label {
+  font-weight: var(--font-medium);
+}
+
+/* Destructive (delete) — neutral background + clearly red icon, slightly red
+   label so it's distinguishable but always legible. */
+.fm-editor-action-btn.fm-editor-btn-destructive .fm-editor-action-btn-icon {
+  color: var(--text-error);
+}
+
+.fm-editor-action-btn.fm-editor-btn-destructive:hover {
+  background: color-mix(in srgb, var(--text-error) 10%, var(--interactive-hover));
+  border-color: color-mix(in srgb, var(--text-error) 40%, var(--background-modifier-border-hover));
+  color: var(--text-error);
+}
+
+.fm-editor-action-btn.fm-editor-btn-destructive:hover .fm-editor-action-btn-icon {
+  color: var(--text-error);
 }
 
 /* ---------------------------------------------------------------- BUTTONS */
@@ -776,47 +868,59 @@
   display: flex;
   flex-direction: column;
   gap: var(--size-4-3);
-  min-width: 640px;
-  max-width: min(900px, 92vw);
-  width: 720px;
+  width: 100%;
+  max-width: min(720px, 88vw);
+  box-sizing: border-box;
 }
 
-/* Override Obsidian's default Setting layout so text inputs are usable. */
+/* Stack Setting rows vertically so the input takes the full modal width and
+   we never push the modal sideways. */
 .fm-editor-modal-content .setting-item {
-  align-items: flex-start;
-  padding: var(--size-4-3) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--size-2-2);
+  padding: var(--size-4-2) 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.fm-editor-modal-content .setting-item:first-of-type {
+  border-top: none;
 }
 
 .fm-editor-modal-content .setting-item-info {
-  margin-right: var(--size-4-3);
-  flex: 0 0 220px;
-  max-width: 240px;
+  margin-right: 0;
+  padding-right: 0;
+  flex: none;
+  max-width: 100%;
 }
 
 .fm-editor-modal-content .setting-item-name {
   font-weight: var(--font-semibold);
+  font-size: var(--font-ui-small);
 }
 
 .fm-editor-modal-content .setting-item-description {
   font-size: var(--font-ui-smaller);
   line-height: 1.5;
+  margin-top: 2px;
+  color: var(--text-muted);
 }
 
 .fm-editor-modal-content .setting-item-control {
   flex: 1 1 auto;
-  min-width: 320px;
-  justify-content: flex-end;
+  width: 100%;
+  min-width: 0;
+  justify-content: stretch;
   gap: var(--size-2-2);
 }
 
-/* Native Obsidian text inputs in our modals: full-width, comfortable padding,
-   readable font-size. */
 .fm-editor-modal-content .setting-item-control input[type="text"],
 .fm-editor-modal-content .setting-item-control input[type="search"],
 .fm-editor-modal-content .setting-item-control input:not([type]) {
   flex: 1 1 auto;
-  min-width: 280px;
   width: 100%;
+  min-width: 0;
   padding: var(--size-2-3) var(--size-4-2);
   font-size: var(--font-ui-small);
   border-radius: var(--radius-s);
@@ -824,20 +928,32 @@
 
 .fm-editor-modal-content .setting-item-control select {
   flex: 1 1 auto;
-  min-width: 240px;
+  width: 100%;
+  min-width: 0;
   padding: var(--size-2-3) var(--size-4-2);
   font-size: var(--font-ui-small);
 }
 
 .fm-editor-modal-content .setting-item-control .dropdown {
   flex: 1 1 auto;
-  min-width: 240px;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Toggle: keep right-aligned so it's clearly the indicator */
+.fm-editor-modal-content .setting-item-control .checkbox-container {
+  flex: none;
+}
+
+.fm-editor-modal-content > * {
+  min-width: 0;
 }
 
 .fm-editor-modal-target {
   display: flex;
-  align-items: center;
-  gap: var(--size-4-2);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--size-2-2) var(--size-4-2);
   padding: var(--size-4-2) var(--size-4-3);
   background: var(--background-secondary);
   border-left: 3px solid var(--interactive-accent);
@@ -850,18 +966,20 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-faint);
+  white-space: nowrap;
 }
 
 .fm-editor-modal-target-count {
   color: var(--text-accent);
   font-weight: var(--font-semibold);
+  white-space: nowrap;
 }
 
 .fm-editor-modal-target-hint {
-  flex: 1;
+  flex: 1 1 100%;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
-  text-align: right;
+  line-height: 1.5;
 }
 
 .fm-editor-modal-hint {
@@ -935,6 +1053,8 @@
 .fm-editor-preview-diff {
   font-family: var(--font-monospace);
   font-size: var(--font-ui-smaller);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .fm-editor-preview-label {
@@ -945,10 +1065,14 @@
 
 .fm-editor-preview-before {
   color: var(--text-error);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .fm-editor-preview-after {
   color: var(--text-success);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .fm-editor-modal-status {

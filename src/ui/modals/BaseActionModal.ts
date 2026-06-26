@@ -65,7 +65,7 @@ export abstract class BaseActionModal extends Modal {
     });
     setIcon(applyBtn.createSpan(), "check");
     applyBtn.createSpan({
-      text: `Apply rule to ${this.targets.length} ${this.targets.length === 1 ? "note" : "notes"}`,
+      text: "Apply",
     });
     applyBtn.addEventListener("click", () => this.runApply());
     this.applyBtn = applyBtn;
@@ -123,8 +123,14 @@ export abstract class BaseActionModal extends Modal {
     if (result.errors.length > 0) {
       console.warn("frontmatter-editor: errors", result.errors);
     }
-    this.setStatus(`Done. ${summary}. Snapshot: ${result.snapshotId ?? "n/a"}`);
     this.onDone();
+    if (result.errorCount === 0) {
+      this.close();
+    } else {
+      this.setStatus(
+        `Done with errors: ${summary}. Check console. Snapshot: ${result.snapshotId ?? "n/a"}`,
+      );
+    }
   }
 
   private showUndoableNotice(summary: string, snapshotId: string | null): void {
