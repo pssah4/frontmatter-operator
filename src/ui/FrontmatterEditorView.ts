@@ -50,8 +50,11 @@ export class FrontmatterEditorView extends ItemView {
   private dragSourceIndex: number | null = null;
   private openFilterPopoverFor: string | null = null;
   private activeMultiSelectPopover: MultiSelectPopover | null = null;
+  private notePathFilter = "";
 
   private actionHintEl: HTMLElement | null = null;
+  private tableBodyEl: HTMLElement | null = null;
+  private resultsCountEl: HTMLElement | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -114,6 +117,14 @@ export class FrontmatterEditorView extends ItemView {
     if (perCol.length > 0) {
       rows = rows.filter((row) =>
         perCol.every((f) => evaluateFilter(f, row)),
+      );
+    }
+    const pathNeedle = this.notePathFilter.trim().toLowerCase();
+    if (pathNeedle) {
+      rows = rows.filter(
+        (row) =>
+          row.path.toLowerCase().includes(pathNeedle) ||
+          row.basename.toLowerCase().includes(pathNeedle),
       );
     }
 
@@ -222,7 +233,7 @@ export class FrontmatterEditorView extends ItemView {
           this.columns.splice(idx, 1);
         }
         this.recomputeFilteredRows();
-        this.renderTableOnly();
+        this.render();
       },
       onClose: () => {
         this.activeMultiSelectPopover = null;
@@ -232,34 +243,11 @@ export class FrontmatterEditorView extends ItemView {
     this.activeMultiSelectPopover = popover;
   }
 
-  private renderTableOnly(): void {
-    const root = this.containerEl.children[1] as HTMLElement;
-    const old = root.querySelector(".fm-editor-results-box");
-    if (!old || !old.parentElement) {
-      this.render();
-      return;
-    }
-    const parent = old.parentElement;
-    const placeholder = parent.createDiv();
-    old.replaceWith(placeholder);
-    parent.removeChild(placeholder);
-    const tmpHolder = parent.createDiv();
-    this.renderResultsTable(parent);
-    const newBox = parent.querySelector(".fm-editor-results-box");
-    tmpHolder.remove();
-    if (newBox) {
-      const actionBar = parent.querySelector(".fm-editor-action-bar");
-      if (actionBar) {
-        parent.insertBefore(newBox, actionBar);
-      }
-    }
-  }
-
   private renderFilterBar(parent: HTMLElement): void {
     const bar = parent.createDiv({ cls: "fm-editor-filter-bar" });
     const head = bar.createDiv({ cls: "fm-editor-filter-head" });
     head.createSpan({
-      text: "Filters",
+      text: "WHEN (rule conditions)",
       cls: "fm-editor-section-title",
     });
 
@@ -420,14 +408,10 @@ export class FrontmatterEditorView extends ItemView {
     const box = parent.createDiv({ cls: "fm-editor-results-box" });
     const head = box.createDiv({ cls: "fm-editor-results-head" });
 
-    const activeFilterCount = this.activeFilters().length;
-    head.createSpan({
-      text: `Results: ${this.filteredRows.length} note${this.filteredRows.length === 1 ? "" : "s"}` +
-        (activeFilterCount > 0
-          ? ` (${activeFilterCount} per-column filter${activeFilterCount === 1 ? "" : "s"} active)`
-          : ""),
+    this.resultsCountEl = head.createSpan({
       cls: "fm-editor-section-title",
     });
+    this.updateResultsCount();
 
     const allSelected =
       this.filteredRows.length > 0 &&
@@ -448,11 +432,12 @@ export class FrontmatterEditorView extends ItemView {
     const tableWrap = box.createDiv({ cls: "fm-editor-table-wrap" });
     const table = tableWrap.createEl("table", { cls: "fm-editor-table" });
     const thead = table.createEl("thead");
-    const headRow = thead.createEl("tr");
+
+    const headRow = thead.createEl("tr", { cls: "fm-editor-head-row" });
     headRow.createEl("th", { text: "", cls: "fm-editor-col-check" });
 
     const noteTh = headRow.createEl("th", { cls: "fm-editor-col-note-head" });
-    noteTh.createSpan({ text: "Note" });
+    noteTh.createSpan({ text: "Note", cls: "fm-editor-col-head-name" });
 
     this.columns.forEach((col, index) => {
       this.renderColumnHeader(headRow, col, index);
@@ -469,7 +454,135 @@ export class FrontmatterEditorView extends ItemView {
       this.openPropertyPicker(addBtn);
     });
 
+    this.renderFilterRow(thead);
+
     const tbody = table.createEl("tbody");
+    this.tableBodyEl = tbody;
+    this.renderTableBodyOnly();
+
+    if (this.filteredRows.length > MAX_VISIBLE_ROWS) {
+      box.createDiv({
+        cls: "fm-editor-truncated-hint",
+        text: `Showing first ${MAX_VISIBLE_ROWS} of ${this.filteredRows.length} results. Actions still run on all filtered notes.`,
+      });
+    }
+  }
+
+  private renderFilterRow(thead: HTMLElement): void {
+    const tr = thead.createEl("tr", { cls: "fm-editor-filter-row" });
+    tr.createEl("td", { cls: "fm-editor-col-check" });
+
+    const noteTd = tr.createEl("td", { cls: "fm-editor-filter-cell" });
+    this.renderNoteFilterInput(noteTd);
+
+    for (const col of this.columns) {
+      const td = tr.createEl("td", { cls: "fm-editor-filter-cell" });
+      this.renderColumnFilterInput(td, col);
+    }
+
+    tr.createEl("td", { cls: "fm-editor-col-add" });
+  }
+
+  private renderNoteFilterInput(parent: HTMLElement): void {
+    const input = parent.createEl("input", {
+      type: "text",
+      cls: "fm-editor-filter-input",
+      placeholder: "Filter path...",
+    });
+    input.value = this.notePathFilter;
+    input.addEventListener("input", () => {
+      this.notePathFilter = input.value;
+      this.recomputeFilteredRows();
+      this.renderTableBodyOnly();
+      this.updateResultsCount();
+      this.updateActionBarHint();
+    });
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        this.notePathFilter = "";
+        input.value = "";
+        this.recomputeFilteredRows();
+        this.renderTableBodyOnly();
+        this.updateResultsCount();
+        this.updateActionBarHint();
+        input.blur();
+      }
+    });
+  }
+
+  private renderColumnFilterInput(parent: HTMLElement, col: ColumnState): void {
+    const isAdvanced =
+      col.filter !== null &&
+      col.filter.operator !== "contains";
+
+    if (isAdvanced && col.filter) {
+      const chip = parent.createDiv({ cls: "fm-editor-filter-advanced" });
+      const label = chip.createSpan({
+        cls: "fm-editor-filter-advanced-label",
+      });
+      label.setText(
+        `${humanOp(col.filter.operator)}${
+          col.filter.value ? ` ${col.filter.value}` : ""
+        }`,
+      );
+      label.title = "Advanced filter -- click the column caret to edit";
+      const clearBtn = chip.createEl("button", {
+        text: "x",
+        cls: "fm-editor-filter-clear",
+      });
+      clearBtn.title = "Clear filter";
+      clearBtn.addEventListener("click", () => {
+        col.filter = null;
+        this.recomputeFilteredRows();
+        this.render();
+      });
+      return;
+    }
+
+    const input = parent.createEl("input", {
+      type: "text",
+      cls: "fm-editor-filter-input",
+      placeholder: "Filter...",
+    });
+    input.value = col.filter?.value ?? "";
+    input.addEventListener("input", () => {
+      const v = input.value;
+      if (v.length === 0) {
+        col.filter = null;
+      } else {
+        col.filter = {
+          id: uid(),
+          property: col.property,
+          operator: "contains",
+          value: v,
+          caseSensitive: false,
+        };
+      }
+      this.recomputeFilteredRows();
+      this.renderTableBodyOnly();
+      this.updateResultsCount();
+      this.updateActionBarHint();
+      this.updateHeaderFilterIndicators();
+    });
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        col.filter = null;
+        input.value = "";
+        this.recomputeFilteredRows();
+        this.renderTableBodyOnly();
+        this.updateResultsCount();
+        this.updateActionBarHint();
+        this.updateHeaderFilterIndicators();
+        input.blur();
+      }
+    });
+  }
+
+  private renderTableBodyOnly(): void {
+    const tbody = this.tableBodyEl;
+    if (!tbody) return;
+    tbody.empty();
+
     const shown = this.filteredRows.slice(0, MAX_VISIBLE_ROWS);
     for (const row of shown) {
       const tr = tbody.createEl("tr");
@@ -505,13 +618,40 @@ export class FrontmatterEditorView extends ItemView {
       }
       tr.createEl("td", { cls: "fm-editor-col-add" });
     }
+  }
 
-    if (this.filteredRows.length > MAX_VISIBLE_ROWS) {
-      box.createDiv({
-        cls: "fm-editor-truncated-hint",
-        text: `Showing first ${MAX_VISIBLE_ROWS} of ${this.filteredRows.length} results. Actions still run on all filtered notes.`,
-      });
-    }
+  private updateResultsCount(): void {
+    if (!this.resultsCountEl) return;
+    const active = this.activeFilters().length + (this.notePathFilter ? 1 : 0);
+    this.resultsCountEl.setText(
+      `${this.filteredRows.length} note${this.filteredRows.length === 1 ? "" : "s"}` +
+        (active > 0
+          ? ` match the current rule (${active} column filter${active === 1 ? "" : "s"})`
+          : ` -- no column filters yet`),
+    );
+  }
+
+  private updateHeaderFilterIndicators(): void {
+    const root = this.containerEl.children[1] as HTMLElement;
+    const headers = root.querySelectorAll(".fm-editor-col-head");
+    headers.forEach((th, idx) => {
+      const col = this.columns[idx];
+      if (!col) return;
+      th.toggleClass("fm-editor-col-filtered", !!col.filter);
+      const existingDot = th.querySelector(".fm-editor-col-filter-dot");
+      if (col.filter && !existingDot) {
+        const label = th.querySelector(".fm-editor-col-head-label");
+        if (label) {
+          const dot = document.createElement("span");
+          dot.className = "fm-editor-col-filter-dot";
+          dot.textContent = " •";
+          dot.title = "Filter active";
+          label.appendChild(dot);
+        }
+      } else if (!col.filter && existingDot) {
+        existingDot.remove();
+      }
+    });
   }
 
   private renderColumnHeader(
@@ -802,7 +942,13 @@ export class FrontmatterEditorView extends ItemView {
 
   private renderActionBar(parent: HTMLElement): void {
     const bar = parent.createDiv({ cls: "fm-editor-action-bar" });
-    this.actionHintEl = bar.createDiv({ cls: "fm-editor-action-hint" });
+
+    const header = bar.createDiv({ cls: "fm-editor-action-header" });
+    header.createSpan({
+      text: "THEN (apply this action)",
+      cls: "fm-editor-section-title",
+    });
+    this.actionHintEl = header.createDiv({ cls: "fm-editor-action-hint" });
     this.updateActionBarHint();
 
     const buttons = bar.createDiv({ cls: "fm-editor-action-buttons" });

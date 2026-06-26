@@ -33,6 +33,20 @@ export abstract class BaseActionModal extends Modal {
     contentEl.addClass("fm-editor-modal");
     contentEl.createEl("h2", { text: this.title() });
 
+    const target = contentEl.createDiv({ cls: "fm-editor-modal-target" });
+    target.createSpan({
+      cls: "fm-editor-modal-target-label",
+      text: "Rule target:",
+    });
+    target.createSpan({
+      cls: "fm-editor-modal-target-count",
+      text: `${this.targets.length} note${this.targets.length === 1 ? "" : "s"}`,
+    });
+    target.createSpan({
+      cls: "fm-editor-modal-target-hint",
+      text: "from the current filter selection. Cancel and adjust filters if this is wrong.",
+    });
+
     const form = contentEl.createDiv({ cls: "fm-editor-modal-form" });
     this.buildForm(form);
 
