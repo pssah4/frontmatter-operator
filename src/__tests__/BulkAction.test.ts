@@ -52,20 +52,42 @@ describe("applyActionPure", () => {
   });
 
   describe("delete", () => {
-    it("removes property", () => {
+    it("removes a single property", () => {
       const out = applyActionPure(
         { foo: "bar", keep: 1 },
-        { type: "delete", property: "foo" },
+        { type: "delete", properties: ["foo"] },
       );
       expect(out.changed).toBe(true);
       expect(out.after.foo).toBeUndefined();
       expect(out.after.keep).toBe(1);
     });
 
-    it("skips when property absent", () => {
+    it("removes multiple properties at once", () => {
+      const out = applyActionPure(
+        { a: 1, b: 2, c: 3, keep: 4 },
+        { type: "delete", properties: ["a", "b", "c"] },
+      );
+      expect(out.changed).toBe(true);
+      expect(out.after.a).toBeUndefined();
+      expect(out.after.b).toBeUndefined();
+      expect(out.after.c).toBeUndefined();
+      expect(out.after.keep).toBe(4);
+    });
+
+    it("removes the subset that exists", () => {
+      const out = applyActionPure(
+        { a: 1, keep: 4 },
+        { type: "delete", properties: ["a", "missing"] },
+      );
+      expect(out.changed).toBe(true);
+      expect(out.after.a).toBeUndefined();
+      expect(out.after.keep).toBe(4);
+    });
+
+    it("skips when none of the properties exist", () => {
       const out = applyActionPure(
         { keep: 1 },
-        { type: "delete", property: "foo" },
+        { type: "delete", properties: ["foo", "bar"] },
       );
       expect(out.changed).toBe(false);
     });

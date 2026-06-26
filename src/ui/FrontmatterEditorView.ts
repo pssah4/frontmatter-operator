@@ -16,7 +16,9 @@ import { FILTER_OPERATORS } from "../types";
 import { applyFilters, evaluateFilter } from "../services/FilterEngine";
 import { SetActionModal } from "./modals/SetActionModal";
 import { DeleteActionModal } from "./modals/DeleteActionModal";
-import { TransformActionModal } from "./modals/TransformActionModal";
+import { RenameActionModal } from "./modals/RenameActionModal";
+import { CopyActionModal } from "./modals/CopyActionModal";
+import { MergeActionModal } from "./modals/MergeActionModal";
 import { SnapshotsModal } from "./modals/SnapshotsModal";
 import { HelpModal } from "./modals/HelpModal";
 import { Combobox } from "./components/Combobox";
@@ -948,11 +950,23 @@ export class FrontmatterEditorView extends ItemView {
     }
 
     this.menuDivider(menu);
-    this.menuItem(menu, "eye-off", "Hide column", false, () => {
+    this.menuItem(menu, "eye-off", "Hide column from view", false, () => {
       this.columns.splice(index, 1);
       this.recomputeFilteredRows();
       this.render();
     });
+
+    const targetCount = this.getTargetRows().length;
+    const delItem = this.menuItem(
+      menu,
+      "trash-2",
+      `Delete property "${col.property}" from ${targetCount} matched notes...`,
+      false,
+      () => {
+        this.openDeleteForProperty(col.property);
+      },
+    );
+    delItem.addClass("fm-editor-menu-item-danger");
 
     const closeOnOutside = (ev: MouseEvent) => {
       if (!menu.contains(ev.target as Node)) {
@@ -980,7 +994,7 @@ export class FrontmatterEditorView extends ItemView {
     label: string,
     active: boolean,
     onClick: () => void,
-  ): void {
+  ): HTMLElement {
     const item = parent.createDiv({ cls: "fm-editor-menu-item" });
     if (active) item.addClass("fm-editor-menu-item-active");
     const check = item.createSpan({ cls: "fm-editor-menu-check" });
@@ -992,6 +1006,7 @@ export class FrontmatterEditorView extends ItemView {
       parent.remove();
       onClick();
     });
+    return item;
   }
 
   private menuDivider(parent: HTMLElement): void {
@@ -1116,17 +1131,32 @@ export class FrontmatterEditorView extends ItemView {
     });
     setIcon(setBtn.createSpan(), "file-plus");
     setBtn.createSpan({ text: "Set property" });
+    setBtn.title = "Write a value into a property on every matched note";
     setBtn.addEventListener("click", () => this.openSetModal());
 
-    const delBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
-    setIcon(delBtn.createSpan(), "file-minus");
-    delBtn.createSpan({ text: "Delete property" });
-    delBtn.addEventListener("click", () => this.openDeleteModal());
+    const renameBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
+    setIcon(renameBtn.createSpan(), "pen-line");
+    renameBtn.createSpan({ text: "Rename" });
+    renameBtn.title = "Change a property's name (1 → 1)";
+    renameBtn.addEventListener("click", () => this.openRenameModal());
 
-    const transformBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
-    setIcon(transformBtn.createSpan(), "replace");
-    transformBtn.createSpan({ text: "Rename / Copy / Move" });
-    transformBtn.addEventListener("click", () => this.openTransformModal());
+    const copyBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
+    setIcon(copyBtn.createSpan(), "copy");
+    copyBtn.createSpan({ text: "Copy" });
+    copyBtn.title = "Copy values from one or more properties into a target (sources kept)";
+    copyBtn.addEventListener("click", () => this.openCopyModal());
+
+    const mergeBtn = buttons.createEl("button", { cls: "fm-editor-btn" });
+    setIcon(mergeBtn.createSpan(), "git-merge");
+    mergeBtn.createSpan({ text: "Merge" });
+    mergeBtn.title = "Combine several properties into one and delete the sources";
+    mergeBtn.addEventListener("click", () => this.openMergeModal());
+
+    const delBtn = buttons.createEl("button", { cls: "fm-editor-btn mod-warning" });
+    setIcon(delBtn.createSpan(), "trash-2");
+    delBtn.createSpan({ text: "Delete properties" });
+    delBtn.title = "Remove one or more properties entirely (key + value)";
+    delBtn.addEventListener("click", () => this.openDeleteModal());
   }
 
   private getTargetRows(): NoteRow[] {
@@ -1184,13 +1214,13 @@ export class FrontmatterEditorView extends ItemView {
     ).open();
   }
 
-  private openTransformModal(): void {
+  private openRenameModal(): void {
     const targets = this.getTargetRows();
     if (targets.length === 0) {
       new Notice("No notes targeted — adjust the rule first.");
       return;
     }
-    new TransformActionModal(
+    new RenameActionModal(
       this.app,
       this.plugin,
       targets,
@@ -1198,6 +1228,58 @@ export class FrontmatterEditorView extends ItemView {
       () => {
         void this.refreshScan().then(() => this.render());
       },
+    ).open();
+  }
+
+  private openCopyModal(): void {
+    const targets = this.getTargetRows();
+    if (targets.length === 0) {
+      new Notice("No notes targeted — adjust the rule first.");
+      return;
+    }
+    new CopyActionModal(
+      this.app,
+      this.plugin,
+      targets,
+      this.inventory,
+      () => {
+        void this.refreshScan().then(() => this.render());
+      },
+    ).open();
+  }
+
+  private openMergeModal(): void {
+    const targets = this.getTargetRows();
+    if (targets.length === 0) {
+      new Notice("No notes targeted — adjust the rule first.");
+      return;
+    }
+    new MergeActionModal(
+      this.app,
+      this.plugin,
+      targets,
+      this.inventory,
+      () => {
+        void this.refreshScan().then(() => this.render());
+      },
+    ).open();
+  }
+
+  private openDeleteForProperty(property: string): void {
+    const targets = this.getTargetRows();
+    if (targets.length === 0) {
+      new Notice("No notes targeted — adjust the rule first.");
+      return;
+    }
+    new DeleteActionModal(
+      this.app,
+      this.plugin,
+      targets,
+      this.inventory,
+      () => {
+        void this.refreshScan().then(() => this.render());
+      },
+      [property],
     ).open();
   }
 }

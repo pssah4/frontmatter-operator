@@ -82,12 +82,14 @@ export class SetActionModal extends BaseActionModal {
       });
 
     new Setting(container)
-      .setName("On conflict")
-      .setDesc("What to do when the property already exists.")
+      .setName("If property already has a value")
+      .setDesc(
+        "What to do on notes where the property is already set. Overwrite replaces, skip leaves existing values alone, merge combines lists.",
+      )
       .addDropdown((d) => {
-        d.addOption("overwrite", "overwrite");
-        d.addOption("skip_if_exists", "skip if exists");
-        d.addOption("merge_list", "merge into list");
+        d.addOption("overwrite", "Overwrite existing value");
+        d.addOption("skip_if_exists", "Only set if missing or empty");
+        d.addOption("merge_list", "Merge into list with existing value");
         d.setValue(this.mode);
         d.onChange((value) => {
           this.mode = value as typeof this.mode;

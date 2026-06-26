@@ -74,7 +74,7 @@ export interface SetAction {
 
 export interface DeleteAction {
   type: "delete";
-  property: string;
+  properties: string[];
 }
 
 export interface RenameAction {

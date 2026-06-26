@@ -92,8 +92,13 @@ function describeAction(action: Snapshot["action"]): string {
   switch (action.type) {
     case "set":
       return `set ${action.property} = ${JSON.stringify(action.value)}`;
-    case "delete":
-      return `delete ${action.property}`;
+    case "delete": {
+      const legacy = (action as { property?: string }).property;
+      const list = action.properties
+        ? action.properties.join(", ")
+        : (legacy ?? "?");
+      return `delete ${list}`;
+    }
     case "rename":
     case "copy":
     case "move": {
@@ -101,7 +106,8 @@ function describeAction(action: Snapshot["action"]): string {
       const sources = action.fromProperties
         ? action.fromProperties.join(" + ")
         : (legacy ?? "?");
-      return `${action.type} ${sources} → ${action.toProperty}`;
+      const verb = action.type === "move" ? "merge" : action.type;
+      return `${verb} ${sources} → ${action.toProperty}`;
     }
   }
 }

@@ -657,7 +657,26 @@
   border-color: var(--interactive-accent-hover);
 }
 
-.fm-editor-btn-warning {
+.fm-editor-btn-warning,
+.fm-editor-btn.mod-warning {
+  color: var(--text-error);
+  border-color: color-mix(in srgb, var(--text-error) 40%, transparent);
+}
+
+.fm-editor-btn.mod-warning:hover {
+  background: color-mix(in srgb, var(--text-error) 15%, var(--interactive-hover));
+  border-color: var(--text-error);
+}
+
+.fm-editor-menu-item-danger {
+  color: var(--text-error);
+}
+
+.fm-editor-menu-item-danger:hover {
+  background: color-mix(in srgb, var(--text-error) 15%, var(--background-modifier-hover));
+}
+
+.fm-editor-menu-item-danger .fm-editor-menu-icon {
   color: var(--text-error);
 }
 

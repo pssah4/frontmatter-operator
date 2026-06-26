@@ -49,22 +49,42 @@ const RECIPES: Recipe[] = [
     ],
   },
   {
-    title: "Merge several legacy properties into one",
-    goal: "Example: collapse Beschreibung, Description, descr into description.",
+    title: "Rename a property",
+    goal: "Example: change Beschreibung to description without changing values.",
     steps: [
-      "Click Rename / Copy / Move.",
-      "Action: rename · From properties: type each legacy name + Enter so they appear as chips · To property: description.",
-      "If target exists: choose merge into list to keep both old and new values; skip leaves notes that already have description alone.",
-      "Preview, Apply rule. The legacy properties are deleted.",
+      "Click Rename in the THEN bar.",
+      "Old name: Beschreibung · New name: description.",
+      "If new name already has a value: Skip (keep both, leave conflicting notes alone) or Merge (combine into list) or Overwrite.",
+      "Preview, Apply rule. The old name is deleted, the value is written under the new name.",
     ],
   },
   {
-    title: "Bulk-delete a legacy property",
-    goal: "Example: remove tags-old from the entire vault.",
+    title: "Copy values into another property (keep source)",
+    goal: "Example: write moc = value-of-Thema while keeping Thema intact.",
     steps: [
-      "WHEN: optional tags-old is not empty to inspect first.",
-      "Click Delete property.",
-      "Property: tags-old · Apply rule.",
+      "Click Copy in the THEN bar.",
+      "Source properties: add Thema · Target property: moc.",
+      "Tick Wrap as wikilink if you want [[Reise]] instead of plain Reise.",
+      "Preview, Apply rule. Thema stays, moc gets the same value.",
+    ],
+  },
+  {
+    title: "Merge legacy properties into one canonical name",
+    goal: "Example: collapse Beschreibung, Description, descr into description.",
+    steps: [
+      "Click Merge in the THEN bar.",
+      "Properties to merge: add each legacy name + Enter so they appear as chips · Target property: description.",
+      "If target exists: Merge into list to keep both old and new values.",
+      "Preview, Apply rule. The legacy properties are deleted, their values land under description.",
+    ],
+  },
+  {
+    title: "Delete a property entirely",
+    goal: "Example: remove tags-old from every matched note.",
+    steps: [
+      "Click Delete properties in the THEN bar (or right-click the column header → Delete property ...).",
+      "Add tags-old to the list (chips). You can add several legacy keys at once.",
+      "Apply rule. Each listed property is removed (key + value) from every matched note.",
     ],
   },
   {

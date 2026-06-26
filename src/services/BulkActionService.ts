@@ -65,10 +65,17 @@ export function applyActionPure(
     }
 
     case "delete": {
-      if (!Object.prototype.hasOwnProperty.call(after, action.property)) {
-        return { after, changed: false, skipped: "property absent" };
+      const props = action.properties ?? [];
+      let changed = false;
+      for (const p of props) {
+        if (Object.prototype.hasOwnProperty.call(after, p)) {
+          delete after[p];
+          changed = true;
+        }
       }
-      delete after[action.property];
+      if (!changed) {
+        return { after, changed: false, skipped: "no matching property" };
+      }
       return { after, changed: true };
     }
 
@@ -270,8 +277,10 @@ export class BulkActionService {
           return;
         }
         case "delete": {
-          if (Object.prototype.hasOwnProperty.call(fm, action.property)) {
-            delete fm[action.property];
+          for (const p of action.properties ?? []) {
+            if (Object.prototype.hasOwnProperty.call(fm, p)) {
+              delete fm[p];
+            }
           }
           return;
         }
