@@ -1400,6 +1400,24 @@
   color: var(--text-normal);
 }
 
+.fm-editor-confirm-message {
+  margin: var(--size-4-2) 0;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+.fm-editor-btn.fm-editor-btn-destructive {
+  background: var(--background-modifier-error, var(--background-modifier-error-hover, #b14d4d));
+  color: var(--text-on-accent);
+  border-color: transparent;
+  font-weight: var(--font-semibold);
+}
+
+.fm-editor-btn.fm-editor-btn-destructive:hover {
+  background: var(--background-modifier-error-hover, #c45757);
+}
+
 /* multi-source chips inside action modals */
 
 .fm-editor-multi-source {

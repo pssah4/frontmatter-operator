@@ -4,6 +4,47 @@ import type { Snapshot, BulkAction, Frontmatter } from "../types";
 const SNAPSHOT_DIR = ".frontmatter-editor/snapshots";
 const MAX_SNAPSHOTS = 50;
 
+// HARD-01: strict snapshot id format. Generated ids follow YYYYMMDD-HHMMSS-XXXX
+// (4 alphanumeric chars). Anything else is rejected before path concatenation.
+const SNAPSHOT_ID_RE = /^[0-9]{8}-[0-9]{6}-[a-z0-9]{2,16}$/;
+
+export function isValidSnapshotId(id: unknown): id is string {
+  return typeof id === "string" && SNAPSHOT_ID_RE.test(id);
+}
+
+// HARD-02: runtime shape validation for snapshot JSON read from disk. Returns
+// null when the shape is wrong; callers must treat null as "discard, do not
+// restore, do not delete via embedded id".
+export function parseSnapshot(raw: unknown): Snapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (!isValidSnapshotId(o.id)) return null;
+  if (typeof o.createdAt !== "string" || isNaN(Date.parse(o.createdAt))) {
+    return null;
+  }
+  if (!o.action || typeof o.action !== "object") return null;
+  const action = o.action as { type?: unknown };
+  if (
+    action.type !== "set" &&
+    action.type !== "delete" &&
+    action.type !== "rename" &&
+    action.type !== "copy" &&
+    action.type !== "move"
+  ) {
+    return null;
+  }
+  if (!Array.isArray(o.entries)) return null;
+  for (const e of o.entries as unknown[]) {
+    if (!e || typeof e !== "object") return null;
+    const entry = e as Record<string, unknown>;
+    if (typeof entry.path !== "string" || entry.path.length === 0) return null;
+    if (entry.before !== null && (typeof entry.before !== "object" || Array.isArray(entry.before))) {
+      return null;
+    }
+  }
+  return o as unknown as Snapshot;
+}
+
 export class SnapshotService {
   constructor(private app: App) {}
 
@@ -40,7 +81,7 @@ export class SnapshotService {
       action: payload.action,
       entries: payload.entries,
     };
-    const file = `${SNAPSHOT_DIR}/${snap.id}.json`;
+    const file = this.pathFor(snap.id);
     await this.adapter.write(file, JSON.stringify(snap, null, 2));
     await this.prune();
     return snap;
@@ -54,8 +95,15 @@ export class SnapshotService {
     for (const f of files) {
       try {
         const raw = await this.adapter.read(f);
-        const snap = JSON.parse(raw) as Snapshot;
-        snaps.push(snap);
+        const parsed = parseSnapshot(JSON.parse(raw));
+        if (parsed) {
+          snaps.push(parsed);
+        } else {
+          console.debug(
+            "frontmatter-editor: snapshot has invalid shape, skipping",
+            f,
+          );
+        }
       } catch (err) {
         console.warn("frontmatter-editor: failed to read snapshot", f, err);
       }
@@ -64,21 +112,27 @@ export class SnapshotService {
   }
 
   async get(id: string): Promise<Snapshot | null> {
-    const file = `${SNAPSHOT_DIR}/${id}.json`;
+    if (!isValidSnapshotId(id)) return null;
+    const file = this.pathFor(id);
     if (!(await this.adapter.exists(file))) return null;
     try {
       const raw = await this.adapter.read(file);
-      return JSON.parse(raw) as Snapshot;
+      return parseSnapshot(JSON.parse(raw));
     } catch {
       return null;
     }
   }
 
   async delete(id: string): Promise<void> {
-    const file = `${SNAPSHOT_DIR}/${id}.json`;
+    if (!isValidSnapshotId(id)) return;
+    const file = this.pathFor(id);
     if (await this.adapter.exists(file)) {
       await this.adapter.remove(file);
     }
+  }
+
+  private pathFor(id: string): string {
+    return `${SNAPSHOT_DIR}/${id}.json`;
   }
 
   private async prune(): Promise<void> {

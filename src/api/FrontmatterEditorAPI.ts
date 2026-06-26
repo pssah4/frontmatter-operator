@@ -13,6 +13,7 @@ import type {
   ScanResult,
 } from "../types";
 import { applyFilters, evaluateFilter } from "../services/FilterEngine";
+import { FILTER_OPERATORS } from "../types";
 
 export type NoteSelector =
   | { kind: "all" }
@@ -78,6 +79,91 @@ function specToFilter(spec: FilterSpec): Filter {
     value: spec.value,
     caseSensitive: spec.caseSensitive,
   };
+}
+
+/**
+ * HARD-06: validate a NoteSelector at the API boundary so external callers
+ * (other plugins, Templater scripts, MCP tools) get a clear error instead of
+ * a downstream crash when they pass a malformed shape.
+ *
+ * Throws TypeError with a human-readable message on the first violation.
+ */
+export function validateNoteSelector(input: unknown): NoteSelector {
+  if (!input || typeof input !== "object") {
+    throw new TypeError("NoteSelector must be an object");
+  }
+  const s = input as Record<string, unknown>;
+  if (s.kind === "all") {
+    return { kind: "all" };
+  }
+  if (s.kind === "paths") {
+    if (!Array.isArray(s.paths)) {
+      throw new TypeError(
+        'NoteSelector kind="paths" requires `paths: string[]`',
+      );
+    }
+    for (const p of s.paths) {
+      if (typeof p !== "string" || p.length === 0) {
+        throw new TypeError(
+          "NoteSelector.paths entries must be non-empty strings",
+        );
+      }
+    }
+    return { kind: "paths", paths: s.paths as string[] };
+  }
+  if (s.kind === "filter") {
+    if (!Array.isArray(s.conditions)) {
+      throw new TypeError(
+        'NoteSelector kind="filter" requires `conditions: FilterSpec[]`',
+      );
+    }
+    const conditions: FilterSpec[] = [];
+    for (const cRaw of s.conditions) {
+      if (!cRaw || typeof cRaw !== "object") {
+        throw new TypeError("NoteSelector.conditions entries must be objects");
+      }
+      const c = cRaw as Record<string, unknown>;
+      if (typeof c.property !== "string") {
+        throw new TypeError("FilterSpec.property must be a string");
+      }
+      if (
+        typeof c.operator !== "string" ||
+        !(FILTER_OPERATORS as readonly string[]).includes(c.operator)
+      ) {
+        throw new TypeError(
+          `FilterSpec.operator must be one of: ${FILTER_OPERATORS.join(", ")}`,
+        );
+      }
+      if (c.value !== undefined && typeof c.value !== "string") {
+        throw new TypeError("FilterSpec.value, when present, must be a string");
+      }
+      if (c.caseSensitive !== undefined && typeof c.caseSensitive !== "boolean") {
+        throw new TypeError("FilterSpec.caseSensitive must be a boolean");
+      }
+      conditions.push({
+        property: c.property,
+        operator: c.operator as FilterSpec["operator"],
+        value: c.value as string | undefined,
+        caseSensitive: c.caseSensitive as boolean | undefined,
+      });
+    }
+    const combinator = s.combinator;
+    if (
+      combinator !== undefined &&
+      combinator !== "AND" &&
+      combinator !== "OR"
+    ) {
+      throw new TypeError('NoteSelector.combinator must be "AND" or "OR"');
+    }
+    return {
+      kind: "filter",
+      conditions,
+      combinator: combinator as FilterCombinator | undefined,
+    };
+  }
+  throw new TypeError(
+    'NoteSelector.kind must be "all", "paths", or "filter"',
+  );
 }
 
 /**
@@ -239,14 +325,15 @@ export class FrontmatterEditorAPI {
   }
 
   private async selectorToRows(select: NoteSelector): Promise<NoteRow[]> {
+    const validated = validateNoteSelector(select);
     const all = this.scanner.buildAllRows();
-    if (select.kind === "all") return all;
-    if (select.kind === "paths") {
-      const set = new Set(select.paths);
+    if (validated.kind === "all") return all;
+    if (validated.kind === "paths") {
+      const set = new Set(validated.paths);
       return all.filter((r) => set.has(r.path));
     }
-    const filters = select.conditions.map(specToFilter);
-    const combinator = select.combinator ?? "AND";
+    const filters = validated.conditions.map(specToFilter);
+    const combinator = validated.combinator ?? "AND";
     const filtered = applyFilters(all, filters, combinator);
     if (combinator === "AND") return filtered;
     return filtered;

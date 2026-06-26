@@ -6,6 +6,7 @@ import type {
   NoteRow,
   PropertyStat,
 } from "../../types";
+import { confirmModal } from "./ConfirmModal";
 
 const PREVIEW_LIMIT = 100;
 
@@ -103,7 +104,14 @@ export abstract class BaseActionModal extends Modal {
       new Notice(built.error);
       return;
     }
-    if (!confirm(`Apply action to ${this.targets.length} note(s)?`)) return;
+    const proceed = await confirmModal(this.app, {
+      title: "Apply rule?",
+      message: `The action will run on ${this.targets.length} note${this.targets.length === 1 ? "" : "s"}. A snapshot is written first, so you can undo from the toolbar.`,
+      confirmLabel: "Apply",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!proceed) return;
 
     this.setStatus(`Writing 0 / ${this.targets.length} ...`);
     const result = await this.plugin.bulk.executeAction(

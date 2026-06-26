@@ -5,6 +5,15 @@ import type {
   NoteRow,
 } from "../types";
 
+// HARD-03: cap the source length of a user-supplied regex to bound the worst
+// case for catastrophic backtracking. 200 chars is enough for any reasonable
+// vault search but rejects the typical (a+)+(b+)+... ReDoS payloads.
+const MAX_REGEX_SOURCE_LENGTH = 200;
+
+export function isRegexAllowed(source: string): boolean {
+  return source.length > 0 && source.length <= MAX_REGEX_SOURCE_LENGTH;
+}
+
 function toComparableString(v: unknown, caseSensitive: boolean): string {
   if (v === null || v === undefined) return "";
   let s: string;
@@ -95,6 +104,7 @@ export function evaluateFilter(filter: Filter, row: NoteRow): boolean {
       return has && toComparableString(value, cs).endsWith(needle);
     case "matches_regex": {
       if (!has) return false;
+      if (!isRegexAllowed(rawNeedle)) return false;
       let re: RegExp;
       try {
         re = new RegExp(rawNeedle, cs ? "" : "i");

@@ -21,6 +21,7 @@ import { CopyActionModal } from "./modals/CopyActionModal";
 import { MergeActionModal } from "./modals/MergeActionModal";
 import { SnapshotsModal } from "./modals/SnapshotsModal";
 import { HelpModal } from "./modals/HelpModal";
+import { confirmModal } from "./modals/ConfirmModal";
 import { Combobox } from "./components/Combobox";
 import {
   MultiSelectPopover,
@@ -419,13 +420,13 @@ export class FrontmatterEditorView extends ItemView {
       return;
     }
     const latest = snaps[0];
-    if (
-      !confirm(
-        `Restore ${latest.entries.length} note(s) from snapshot ${latest.id}?`,
-      )
-    ) {
-      return;
-    }
+    const proceed = await confirmModal(this.app, {
+      title: "Undo last action?",
+      message: `Restore ${latest.entries.length} note${latest.entries.length === 1 ? "" : "s"} from snapshot ${latest.id}.`,
+      confirmLabel: "Restore",
+      cancelLabel: "Cancel",
+    });
+    if (!proceed) return;
     const result = await this.plugin.bulk.restoreSnapshot(latest);
     new Notice(
       `Undo: ${result.successCount} restored, ${result.errorCount} errors`,

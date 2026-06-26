@@ -251,6 +251,56 @@ describe("applyActionPure", () => {
     });
   });
 
+  describe("HARD-04: reserved key deny list", () => {
+    it("set with __proto__ is skipped", () => {
+      const out = applyActionPure(
+        { a: 1 },
+        { type: "set", property: "__proto__", value: "x", mode: "overwrite" },
+      );
+      expect(out.changed).toBe(false);
+      expect(out.skipped).toMatch(/reserved/);
+      expect(Object.getPrototypeOf(out.after)).toBe(Object.prototype);
+    });
+
+    it("rename to constructor is skipped", () => {
+      const out = applyActionPure(
+        { foo: 1 },
+        {
+          type: "rename",
+          fromProperties: ["foo"],
+          toProperty: "constructor",
+          onConflict: "skip",
+        },
+      );
+      expect(out.changed).toBe(false);
+      expect(out.skipped).toMatch(/reserved/);
+      expect(out.after.foo).toBe(1);
+    });
+
+    it("delete filters out reserved keys", () => {
+      const out = applyActionPure(
+        { keep: 1 },
+        { type: "delete", properties: ["__proto__", "keep"] },
+      );
+      expect(out.changed).toBe(true);
+      expect(out.after.keep).toBeUndefined();
+    });
+
+    it("merge with reserved source skips that source", () => {
+      const out = applyActionPure(
+        { a: "x", b: "y" },
+        {
+          type: "move",
+          fromProperties: ["a", "__proto__", "b"],
+          toProperty: "merged",
+          onConflict: "skip",
+        },
+      );
+      expect(out.changed).toBe(true);
+      expect(out.after.merged).toEqual(["x", "y"]);
+    });
+  });
+
   describe("multi-source rename / copy / move", () => {
     it("rename merges three sources into one target and deletes sources", () => {
       const out = applyActionPure(

@@ -118,7 +118,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
       name: "Print frontmatter property inventory to console",
       callback: () => {
         const props = this.scanner.scan().properties;
-        console.info("[frontmatter-editor] property inventory:", props);
+        console.debug("[frontmatter-editor] property inventory:", props);
         new Notice(
           `${props.length} unique properties — see developer console for full inventory.`,
         );

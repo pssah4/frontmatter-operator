@@ -1,4 +1,4 @@
-import type { App, TFile } from "obsidian";
+import { TFile, type App } from "obsidian";
 import type {
   ActionPreview,
   ActionResult,
@@ -14,6 +14,15 @@ import {
   wrapAsWikilink,
 } from "./ValueCoercion";
 import type { SnapshotService } from "./SnapshotService";
+
+// HARD-04: deny these as frontmatter property keys to prevent silent
+// prototype-chain reassignment on the per-note frontmatter object during
+// processFrontMatter or applyActionPure clones.
+const DISALLOWED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function isAllowedKey(key: string): boolean {
+  return key.length > 0 && !DISALLOWED_KEYS.has(key);
+}
 
 function cloneFrontmatter(fm: Frontmatter): Frontmatter {
   return JSON.parse(JSON.stringify(fm));
@@ -34,6 +43,13 @@ export function applyActionPure(
 
   switch (action.type) {
     case "set": {
+      if (!isAllowedKey(action.property)) {
+        return {
+          after,
+          changed: false,
+          skipped: `property name "${action.property}" is reserved`,
+        };
+      }
       const exists = Object.prototype.hasOwnProperty.call(after, action.property);
       if (exists && action.mode === "skip_if_exists") {
         return { after, changed: false, skipped: "property already set" };
@@ -65,7 +81,7 @@ export function applyActionPure(
     }
 
     case "delete": {
-      const props = action.properties ?? [];
+      const props = (action.properties ?? []).filter(isAllowedKey);
       let changed = false;
       for (const p of props) {
         if (Object.prototype.hasOwnProperty.call(after, p)) {
@@ -82,9 +98,16 @@ export function applyActionPure(
     case "rename":
     case "copy":
     case "move": {
-      const sourceProps = action.fromProperties.filter((p) =>
-        Object.prototype.hasOwnProperty.call(after, p),
-      );
+      if (!isAllowedKey(action.toProperty)) {
+        return {
+          after,
+          changed: false,
+          skipped: `target property "${action.toProperty}" is reserved`,
+        };
+      }
+      const sourceProps = action.fromProperties
+        .filter(isAllowedKey)
+        .filter((p) => Object.prototype.hasOwnProperty.call(after, p));
       if (sourceProps.length === 0) {
         return { after, changed: false, skipped: "no source property present" };
       }
@@ -161,22 +184,40 @@ export class BulkActionService {
       errors: [],
     };
 
-    const snapshotEntries: Snapshot["entries"] = [];
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      try {
-        const beforeProbe = applyActionPure(row.frontmatter, action);
-        if (!beforeProbe.changed) {
-          result.skippedCount++;
-          continue;
-        }
-
-        snapshotEntries.push({
-          path: row.path,
-          before: cloneFrontmatter(row.frontmatter),
+    // HARD-08: write the snapshot BEFORE any mutation, derived from the
+    // dry-run preview. Rows where applyActionPure predicts no change are
+    // skipped without being recorded. If the executor crashes (Obsidian
+    // killed, plugin disabled mid-run), the snapshot is already on disk
+    // and the user can restore the affected notes from it.
+    const predictedChanges: Array<{ row: NoteRow; entry: Snapshot["entries"][number] }> = [];
+    for (const row of rows) {
+      const probe = applyActionPure(row.frontmatter, action);
+      if (probe.changed) {
+        predictedChanges.push({
+          row,
+          entry: {
+            path: row.path,
+            before: cloneFrontmatter(row.frontmatter),
+          },
         });
+      }
+    }
+    const skippedUpfront = rows.length - predictedChanges.length;
+    result.skippedCount = skippedUpfront;
 
+    let snap: Snapshot | null = null;
+    if (predictedChanges.length > 0) {
+      snap = await this.snapshots.save({
+        action,
+        entries: predictedChanges.map((p) => p.entry),
+      });
+      result.snapshotId = snap.id;
+    }
+
+    let done = 0;
+    const total = predictedChanges.length;
+    for (const { row } of predictedChanges) {
+      try {
         await this.writeFrontmatter(row.file, action);
         result.successCount++;
       } catch (err) {
@@ -186,15 +227,8 @@ export class BulkActionService {
           message: err instanceof Error ? err.message : String(err),
         });
       }
-      onProgress?.(i + 1, rows.length);
-    }
-
-    if (snapshotEntries.length > 0) {
-      const snap = await this.snapshots.save({
-        action,
-        entries: snapshotEntries,
-      });
-      result.snapshotId = snap.id;
+      done++;
+      onProgress?.(done, total);
     }
 
     return result;
@@ -214,7 +248,9 @@ export class BulkActionService {
     for (let i = 0; i < total; i++) {
       const entry = snapshot.entries[i];
       const file = this.app.vault.getAbstractFileByPath(entry.path);
-      if (!file || !("extension" in file)) {
+      // HARD-05: instanceof TFile instead of the duck-type ("extension" in file)
+      // check -- correctly rejects TFolder and any future abstract subtype.
+      if (!(file instanceof TFile)) {
         result.errorCount++;
         result.errors.push({
           path: entry.path,
@@ -223,17 +259,15 @@ export class BulkActionService {
         continue;
       }
       try {
-        await this.app.fileManager.processFrontMatter(
-          file as TFile,
-          (fm) => {
-            for (const k of Object.keys(fm)) delete fm[k];
-            if (entry.before) {
-              for (const [k, v] of Object.entries(entry.before)) {
-                fm[k] = v as unknown;
-              }
+        await this.app.fileManager.processFrontMatter(file, (fm) => {
+          for (const k of Object.keys(fm)) delete fm[k];
+          if (entry.before) {
+            for (const [k, v] of Object.entries(entry.before)) {
+              if (!isAllowedKey(k)) continue;
+              fm[k] = v as unknown;
             }
-          },
-        );
+          }
+        });
         result.successCount++;
       } catch (err) {
         result.errorCount++;
@@ -254,6 +288,7 @@ export class BulkActionService {
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       switch (action.type) {
         case "set": {
+          if (!isAllowedKey(action.property)) return;
           const exists = Object.prototype.hasOwnProperty.call(
             fm,
             action.property,
@@ -278,6 +313,7 @@ export class BulkActionService {
         }
         case "delete": {
           for (const p of action.properties ?? []) {
+            if (!isAllowedKey(p)) continue;
             if (Object.prototype.hasOwnProperty.call(fm, p)) {
               delete fm[p];
             }
@@ -287,9 +323,10 @@ export class BulkActionService {
         case "rename":
         case "copy":
         case "move": {
-          const sourceProps = action.fromProperties.filter((p) =>
-            Object.prototype.hasOwnProperty.call(fm, p),
-          );
+          if (!isAllowedKey(action.toProperty)) return;
+          const sourceProps = action.fromProperties
+            .filter(isAllowedKey)
+            .filter((p) => Object.prototype.hasOwnProperty.call(fm, p));
           if (sourceProps.length === 0) return;
           const collected = sourceProps.map((p) => fm[p]);
           let merged: FmValue =
