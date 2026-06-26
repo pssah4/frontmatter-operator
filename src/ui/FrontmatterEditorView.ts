@@ -199,141 +199,69 @@ export class FrontmatterEditorView extends ItemView {
       ? this.selectedPaths.size
       : matchedCount;
 
-    this.renderRailCard(rail, {
-      id: "when",
-      icon: "filter",
-      label: "WHEN",
-      badge: whenCount === 0 ? "—" : String(whenCount),
-      sub: whenCount === 0
-        ? "optional"
-        : whenCount === 1
-          ? "1 condition"
-          : `${whenCount} conditions`,
-      active: whenCount > 0,
-      optional: true,
-      onClick: () => this.scrollToSelector(".fm-editor-when-section"),
-      title: "Global conditions (optional). Click to focus the WHEN section.",
+    const steps = [
+      {
+        label: "WHEN",
+        active: whenCount > 0,
+        onClick: () => this.scrollToSelector(".fm-editor-when-section"),
+        title:
+          whenCount === 0
+            ? "WHEN — no global conditions (optional)"
+            : `WHEN — ${whenCount} condition${whenCount === 1 ? "" : "s"}`,
+      },
+      {
+        label: "FILTER",
+        active: filterCount > 0,
+        onClick: () => this.scrollToSelector(".fm-editor-table-section"),
+        title:
+          filterCount === 0
+            ? "FILTER — no column filters (optional)"
+            : `FILTER — ${filterCount} column filter${filterCount === 1 ? "" : "s"}`,
+      },
+      {
+        label: "MATCHED",
+        active: matchedCount > 0,
+        isResult: true,
+        onClick: () => this.scrollToSelector(".fm-editor-table-section"),
+        title: `MATCHED — ${targetCount} note${targetCount === 1 ? "" : "s"}`,
+      },
+      {
+        label: "THEN",
+        active: targetCount > 0,
+        disabled: targetCount === 0,
+        onClick: () => this.scrollToSelector(".fm-editor-action-bar"),
+        title:
+          targetCount === 0
+            ? "THEN — no notes match"
+            : "THEN — pick an action",
+      },
+    ];
+
+    const list = rail.createDiv({ cls: "fm-editor-rail-list" });
+    steps.forEach((s, i) => {
+      const item = list.createDiv({ cls: "fm-editor-rail-item" });
+      if (s.active) item.addClass("is-active");
+      if (s.isResult && s.active) item.addClass("is-result");
+      if (s.disabled) item.addClass("is-disabled");
+      if (i === 0) item.addClass("is-first");
+      if (i === steps.length - 1) item.addClass("is-last");
+
+      item.createSpan({ cls: "fm-editor-rail-dot" });
+      item.createSpan({ cls: "fm-editor-rail-text", text: s.label });
+
+      item.title = s.title;
+      item.setAttribute("role", "button");
+      item.setAttribute("tabindex", s.disabled ? "-1" : "0");
+      if (!s.disabled) {
+        item.addEventListener("click", () => s.onClick());
+        item.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            s.onClick();
+          }
+        });
+      }
     });
-
-    this.renderRailConnector(rail, whenCount > 0 || filterCount > 0);
-
-    this.renderRailCard(rail, {
-      id: "filter",
-      icon: "table-2",
-      label: "FILTER",
-      badge: filterCount === 0 ? "—" : String(filterCount),
-      sub: filterCount === 0
-        ? "optional"
-        : filterCount === 1
-          ? "1 column"
-          : `${filterCount} columns`,
-      active: filterCount > 0,
-      optional: true,
-      onClick: () => this.scrollToSelector(".fm-editor-table-section"),
-      title:
-        "Per-column quick filters (optional). Use either WHEN or FILTER or both — they combine with AND.",
-    });
-
-    this.renderRailConnector(rail, matchedCount > 0);
-    this.renderRailMergeHint(rail);
-
-    this.renderRailCard(rail, {
-      id: "matched",
-      icon: "check-circle-2",
-      label: "MATCHED",
-      badge: String(targetCount),
-      sub: explicitSelection
-        ? `${targetCount} ticked`
-        : matchedCount === this.allRows.length
-          ? "all notes"
-          : "from rule",
-      isResult: true,
-      active: matchedCount > 0,
-      onClick: () => this.scrollToSelector(".fm-editor-table-section"),
-      title: "The notes the action will run on.",
-    });
-
-    this.renderRailConnector(rail, targetCount > 0);
-
-    this.renderRailCard(rail, {
-      id: "then",
-      icon: "play",
-      label: "THEN",
-      badge: targetCount > 0 ? "pick" : "—",
-      sub: targetCount > 0 ? "pick an action" : "no notes match",
-      active: targetCount > 0,
-      disabled: targetCount === 0,
-      pulse: targetCount > 0,
-      onClick: () => this.scrollToSelector(".fm-editor-action-bar"),
-      title: "Pick a bulk action to apply to the matched notes.",
-    });
-  }
-
-  private renderRailCard(
-    parent: HTMLElement,
-    opts: {
-      id: string;
-      icon: string;
-      label: string;
-      badge: string;
-      sub: string;
-      active?: boolean;
-      optional?: boolean;
-      isResult?: boolean;
-      disabled?: boolean;
-      pulse?: boolean;
-      title?: string;
-      onClick: () => void;
-    },
-  ): void {
-    const card = parent.createDiv({
-      cls: `fm-editor-rail-card is-step-${opts.id}`,
-    });
-    if (opts.active) card.addClass("is-active");
-    if (opts.optional && !opts.active) card.addClass("is-empty");
-    if (opts.isResult) card.addClass("is-result");
-    if (opts.disabled) card.addClass("is-disabled");
-    if (opts.pulse) card.addClass("is-pulse");
-    if (opts.title) card.title = opts.title;
-    card.setAttribute("role", "button");
-    card.setAttribute("tabindex", opts.disabled ? "-1" : "0");
-
-    const iconWrap = card.createSpan({ cls: "fm-editor-rail-icon" });
-    setIcon(iconWrap, opts.icon);
-
-    const body = card.createDiv({ cls: "fm-editor-rail-body" });
-    body.createSpan({ cls: "fm-editor-rail-label", text: opts.label });
-    body.createSpan({ cls: "fm-editor-rail-sub", text: opts.sub });
-
-    card.createSpan({ cls: "fm-editor-rail-badge", text: opts.badge });
-    card.createSpan({ cls: "fm-editor-rail-dot" });
-
-    if (!opts.disabled) {
-      card.addEventListener("click", () => opts.onClick());
-      card.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" || ev.key === " ") {
-          ev.preventDefault();
-          opts.onClick();
-        }
-      });
-    }
-  }
-
-  private renderRailConnector(parent: HTMLElement, active: boolean): void {
-    const connector = parent.createSpan({
-      cls: "fm-editor-rail-connector",
-    });
-    if (active) connector.addClass("is-active");
-    setIcon(connector, "chevron-down");
-  }
-
-  private renderRailMergeHint(parent: HTMLElement): void {
-    const hint = parent.createDiv({ cls: "fm-editor-rail-merge-hint" });
-    hint.createSpan({
-      cls: "fm-editor-rail-merge-glyph",
-      text: "AND",
-    });
-    hint.title = "WHEN conditions and FILTER columns are combined with AND.";
   }
 
   private scrollToSelector(selector: string): void {
