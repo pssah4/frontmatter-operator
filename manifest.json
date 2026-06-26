@@ -1,0 +1,10 @@
+{
+  "id": "frontmatter-editor",
+  "name": "Frontmatter Editor",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Filter notes by frontmatter properties and apply bulk edits: set, delete, rename, copy and move values across the whole vault.",
+  "author": "Sebastian Hanke",
+  "authorUrl": "https://github.com/pssah4",
+  "isDesktopOnly": false
+}
