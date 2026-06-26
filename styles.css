@@ -1252,6 +1252,25 @@
   line-height: 1.5;
 }
 
+.fm-editor-generator-textarea {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-3);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  resize: vertical;
+  min-height: 80px;
+  margin-top: var(--size-2-2);
+}
+
+.fm-editor-generator-textarea:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
 .fm-editor-btn.fm-editor-btn-destructive {
   background: var(--background-modifier-error, var(--background-modifier-error-hover, #b14d4d));
   color: var(--text-on-accent);

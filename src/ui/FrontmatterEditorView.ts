@@ -22,6 +22,7 @@ import { MergeActionModal } from "./modals/MergeActionModal";
 import { SnapshotsModal } from "./modals/SnapshotsModal";
 import { HelpModal } from "./modals/HelpModal";
 import { confirmModal } from "./modals/ConfirmModal";
+import { GenerateActionModal } from "./modals/GenerateActionModal";
 import { Combobox } from "./components/Combobox";
 import {
   MultiSelectPopover,
@@ -1270,6 +1271,14 @@ export class FrontmatterEditorView extends ItemView {
     );
     delBtn.addClass("fm-editor-btn-destructive");
     delBtn.addEventListener("click", () => this.openDeleteModal());
+
+    const aiBtn = this.makeActionButton(
+      buttons,
+      "sparkles",
+      "Generate with AI",
+      "Use an LLM provider to fill description, keywords/tags or moc on the matched notes",
+    );
+    aiBtn.addEventListener("click", () => this.openGenerateModal());
   }
 
   private makeActionButton(
@@ -1398,6 +1407,17 @@ export class FrontmatterEditorView extends ItemView {
         void this.refreshScan().then(() => this.render());
       },
     ).open();
+  }
+
+  private openGenerateModal(): void {
+    const targets = this.getTargetRows();
+    if (targets.length === 0) {
+      new Notice("No notes targeted — adjust the rule first.");
+      return;
+    }
+    new GenerateActionModal(this.app, this.plugin, targets, () => {
+      void this.refreshScan().then(() => this.render());
+    }).open();
   }
 
   private openDeleteForProperty(property: string): void {

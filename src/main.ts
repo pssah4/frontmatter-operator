@@ -13,14 +13,25 @@ import { CopyActionModal } from "./ui/modals/CopyActionModal";
 import { MergeActionModal } from "./ui/modals/MergeActionModal";
 import { SnapshotsModal } from "./ui/modals/SnapshotsModal";
 import { FrontmatterEditorAPI } from "./api/FrontmatterEditorAPI";
+import { GeneratorService } from "./services/generator/GeneratorService";
+import {
+  DEFAULT_SETTINGS,
+  type FrontmatterEditorSettings,
+} from "./types/settings";
+import { FrontmatterEditorSettingsTab } from "./ui/settings/SettingsTab";
+import { DEFAULT_PRESETS } from "./types/generators";
 
 export default class FrontmatterEditorPlugin extends Plugin {
   scanner!: FrontmatterScanner;
   snapshots!: SnapshotService;
   bulk!: BulkActionService;
   api!: FrontmatterEditorAPI;
+  generator!: GeneratorService;
+  declare settings: FrontmatterEditorSettings;
 
   async onload(): Promise<void> {
+    await this.loadSettings();
+
     this.scanner = new FrontmatterScanner(this.app);
     this.snapshots = new SnapshotService(this.app);
     this.bulk = new BulkActionService(this.app, this.snapshots);
@@ -30,6 +41,9 @@ export default class FrontmatterEditorPlugin extends Plugin {
       this.bulk,
       this.snapshots,
     );
+    this.generator = new GeneratorService(this.app);
+
+    this.addSettingTab(new FrontmatterEditorSettingsTab(this.app, this));
 
     this.registerView(
       VIEW_TYPE_FRONTMATTER_EDITOR,
@@ -128,6 +142,39 @@ export default class FrontmatterEditorPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_FRONTMATTER_EDITOR);
+  }
+
+  async loadSettings(): Promise<void> {
+    const stored = (await this.loadData()) as Partial<FrontmatterEditorSettings> | null;
+    this.settings = {
+      ...DEFAULT_SETTINGS,
+      ...(stored ?? {}),
+      providers: stored?.providers ?? [],
+      presets: this.mergePresets(stored?.presets),
+    };
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
+  }
+
+  private mergePresets(stored?: typeof DEFAULT_PRESETS): typeof DEFAULT_PRESETS {
+    // Keep built-in presets in sync with code; preserve user prompt edits.
+    if (!stored || stored.length === 0) return JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+    const byId = new Map(stored.map((p) => [p.id, p]));
+    const merged = DEFAULT_PRESETS.map((d) => {
+      const existing = byId.get(d.id);
+      if (!existing) return JSON.parse(JSON.stringify(d));
+      // existing wins for prompts; missing language fallback to default
+      return {
+        ...d,
+        prompts: {
+          en: existing.prompts?.en ?? d.prompts.en,
+          de: existing.prompts?.de ?? d.prompts.de,
+        },
+      };
+    });
+    return merged;
   }
 
   async activateView(): Promise<void> {
