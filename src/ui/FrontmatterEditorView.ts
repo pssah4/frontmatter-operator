@@ -17,6 +17,11 @@ import { SetActionModal } from "./modals/SetActionModal";
 import { DeleteActionModal } from "./modals/DeleteActionModal";
 import { TransformActionModal } from "./modals/TransformActionModal";
 import { SnapshotsModal } from "./modals/SnapshotsModal";
+import { Combobox } from "./components/Combobox";
+import {
+  MultiSelectPopover,
+  type MultiOption,
+} from "./components/MultiSelectPopover";
 
 export const VIEW_TYPE_FRONTMATTER_EDITOR = "frontmatter-editor-view";
 
@@ -40,10 +45,10 @@ export class FrontmatterEditorView extends ItemView {
   private allRows: NoteRow[] = [];
   private filteredRows: NoteRow[] = [];
   private selectedPaths = new Set<string>();
-  private propertySearch = "";
   private columns: ColumnState[] = [];
   private dragSourceIndex: number | null = null;
   private openFilterPopoverFor: string | null = null;
+  private activeMultiSelectPopover: MultiSelectPopover | null = null;
 
   private actionHintEl: HTMLElement | null = null;
 
@@ -97,10 +102,9 @@ export class FrontmatterEditorView extends ItemView {
   }
 
   private activeFilters(): Filter[] {
-    const perCol = this.columns
+    return this.columns
       .map((c) => c.filter)
       .filter((f): f is Filter => !!f);
-    return perCol;
   }
 
   private recomputeFilteredRows(): void {
@@ -135,137 +139,120 @@ export class FrontmatterEditorView extends ItemView {
   }
 
   private render(): void {
+    if (this.activeMultiSelectPopover) {
+      this.activeMultiSelectPopover.close();
+      this.activeMultiSelectPopover = null;
+    }
     const root = this.containerEl.children[1] as HTMLElement;
     root.empty();
     root.addClass("fm-editor-content");
 
-    this.renderHeader(root);
-    const main = root.createDiv({ cls: "fm-editor-main" });
-    this.renderSidebar(main);
-    this.renderRightPane(main);
+    this.renderToolbar(root);
+    this.renderFilterBar(root);
+    this.renderResultsTable(root);
+    this.renderActionBar(root);
   }
 
-  private renderHeader(root: HTMLElement): void {
+  private renderToolbar(root: HTMLElement): void {
     const header = root.createDiv({ cls: "fm-editor-header" });
-    const title = header.createDiv({ cls: "fm-editor-title" });
-    title.createSpan({ text: "Frontmatter Editor", cls: "fm-editor-title-text" });
-    title.createSpan({
-      text: ` -- ${this.allRows.length} notes with frontmatter, ${this.inventory.length} unique properties`,
+
+    const left = header.createDiv({ cls: "fm-editor-header-left" });
+    left.createSpan({
+      text: "Frontmatter Editor",
+      cls: "fm-editor-title-text",
+    });
+    left.createSpan({
+      text: `${this.allRows.length} notes  ${this.inventory.length} properties`,
       cls: "fm-editor-subtitle",
     });
 
-    const toolbar = header.createDiv({ cls: "fm-editor-toolbar" });
-    this.button(toolbar, "Refresh", async () => {
-      await this.refreshScan();
-      this.render();
+    const right = header.createDiv({ cls: "fm-editor-header-right" });
+
+    const propBtn = this.iconButton(right, "Properties", "Pick visible columns");
+    propBtn.addEventListener("click", () => {
+      this.openPropertyPicker(propBtn);
     });
-    this.button(toolbar, "Snapshots / Undo", () => {
-      new SnapshotsModal(this.app, this.plugin, () => {
-        void this.refreshScan().then(() => this.render());
-      }).open();
-    });
-    this.button(toolbar, "Reset columns", () => {
-      this.columns = this.suggestColumns();
-      this.recomputeFilteredRows();
-      this.render();
-    });
+
+    this.iconButton(right, "Refresh", "Re-scan vault").addEventListener(
+      "click",
+      async () => {
+        await this.refreshScan();
+        this.render();
+      },
+    );
+    this.iconButton(right, "Snapshots", "Open snapshot manager").addEventListener(
+      "click",
+      () => {
+        new SnapshotsModal(this.app, this.plugin, () => {
+          void this.refreshScan().then(() => this.render());
+        }).open();
+      },
+    );
   }
 
-  private renderSidebar(parent: HTMLElement): void {
-    const sidebar = parent.createDiv({ cls: "fm-editor-sidebar" });
-    const head = sidebar.createDiv({ cls: "fm-editor-sidebar-head" });
-    head.createEl("h3", {
-      text: "Properties",
-      cls: "fm-editor-section-title",
-    });
-    head.createSpan({
-      text: `${this.columns.length} shown`,
-      cls: "fm-editor-empty-hint",
-    });
-
-    const search = sidebar.createEl("input", {
-      type: "text",
-      cls: "fm-editor-prop-search",
-      placeholder: "Filter property names...",
-    });
-    search.value = this.propertySearch;
-    search.addEventListener("input", () => {
-      this.propertySearch = search.value;
-      this.renderInventory(list);
-    });
-
-    const list = sidebar.createDiv({ cls: "fm-editor-prop-list" });
-    this.renderInventory(list);
-  }
-
-  private renderInventory(container: HTMLElement): void {
-    container.empty();
-    const needle = this.propertySearch.trim().toLowerCase();
-    const items = needle
-      ? this.inventory.filter((p) => p.name.toLowerCase().includes(needle))
-      : this.inventory;
-
-    if (items.length === 0) {
-      container.createDiv({
-        text: "No properties match the filter.",
-        cls: "fm-editor-empty-hint",
-      });
+  private openPropertyPicker(anchor: HTMLElement): void {
+    if (this.activeMultiSelectPopover) {
+      this.activeMultiSelectPopover.close();
+      this.activeMultiSelectPopover = null;
       return;
     }
-
-    const visible = new Set(this.columns.map((c) => c.property));
-
-    for (const prop of items) {
-      const row = container.createDiv({ cls: "fm-editor-prop-item" });
-      const cb = row.createEl("input", {
-        type: "checkbox",
-        cls: "fm-editor-prop-check",
-      });
-      cb.checked = visible.has(prop.name);
-      cb.addEventListener("click", (ev) => ev.stopPropagation());
-      cb.addEventListener("change", () => {
-        this.toggleColumn(prop.name, cb.checked);
-      });
-
-      const nameWrap = row.createDiv({ cls: "fm-editor-prop-name-wrap" });
-      const nameEl = nameWrap.createDiv({ cls: "fm-editor-prop-name" });
-      nameEl.setText(prop.name);
-      const typesEl = nameWrap.createDiv({ cls: "fm-editor-prop-types" });
-      typesEl.setText(Array.from(prop.types).join(" / "));
-
-      const countEl = row.createDiv({ cls: "fm-editor-prop-count" });
-      countEl.setText(String(prop.count));
-
-      row.title = `Samples:\n  ${prop.sampleValues.slice(0, 6).join("\n  ")}`;
-      row.addEventListener("click", () => {
-        this.toggleColumn(prop.name, !visible.has(prop.name));
-      });
-    }
+    const options: MultiOption[] = this.inventory.map((p) => ({
+      value: p.name,
+      label: p.name,
+      hint: Array.from(p.types).join(" / "),
+      meta: String(p.count),
+    }));
+    const selected = new Set(this.columns.map((c) => c.property));
+    const popover = new MultiSelectPopover({
+      options,
+      selected,
+      placeholder: "Search properties...",
+      onToggle: (value, isSelected) => {
+        const idx = this.columns.findIndex((c) => c.property === value);
+        if (isSelected && idx === -1) {
+          this.columns.push({ property: value, sort: null, filter: null });
+        } else if (!isSelected && idx >= 0) {
+          this.columns.splice(idx, 1);
+        }
+        this.recomputeFilteredRows();
+        this.renderTableOnly();
+      },
+      onClose: () => {
+        this.activeMultiSelectPopover = null;
+      },
+    });
+    popover.attach(anchor);
+    this.activeMultiSelectPopover = popover;
   }
 
-  private toggleColumn(property: string, on: boolean): void {
-    const idx = this.columns.findIndex((c) => c.property === property);
-    if (on && idx === -1) {
-      this.columns.push({ property, sort: null, filter: null });
-    } else if (!on && idx >= 0) {
-      this.columns.splice(idx, 1);
+  private renderTableOnly(): void {
+    const root = this.containerEl.children[1] as HTMLElement;
+    const old = root.querySelector(".fm-editor-results-box");
+    if (!old || !old.parentElement) {
+      this.render();
+      return;
     }
-    this.recomputeFilteredRows();
-    this.render();
-  }
-
-  private renderRightPane(parent: HTMLElement): void {
-    const right = parent.createDiv({ cls: "fm-editor-right" });
-    this.renderFilterBar(right);
-    this.renderResultsTable(right);
-    this.renderActionBar(right);
+    const parent = old.parentElement;
+    const placeholder = parent.createDiv();
+    old.replaceWith(placeholder);
+    parent.removeChild(placeholder);
+    const tmpHolder = parent.createDiv();
+    this.renderResultsTable(parent);
+    const newBox = parent.querySelector(".fm-editor-results-box");
+    tmpHolder.remove();
+    if (newBox) {
+      const actionBar = parent.querySelector(".fm-editor-action-bar");
+      if (actionBar) {
+        parent.insertBefore(newBox, actionBar);
+      }
+    }
   }
 
   private renderFilterBar(parent: HTMLElement): void {
     const bar = parent.createDiv({ cls: "fm-editor-filter-bar" });
     const head = bar.createDiv({ cls: "fm-editor-filter-head" });
     head.createSpan({
-      text: "Global filters",
+      text: "Filters",
       cls: "fm-editor-section-title",
     });
 
@@ -280,51 +267,65 @@ export class FrontmatterEditorView extends ItemView {
       this.render();
     });
 
-    this.button(head, "+ Add filter", () => {
-      this.globalFilters.push({
-        id: uid(),
-        property: this.inventory[0]?.name ?? "",
-        operator: "exists",
-      });
-      this.recomputeFilteredRows();
-      this.render();
-    });
-    this.button(head, "Clear", () => {
-      this.globalFilters = [];
-      for (const c of this.columns) c.filter = null;
-      this.recomputeFilteredRows();
-      this.render();
-    });
+    this.iconButton(head, "+ Filter", "Add a filter row").addEventListener(
+      "click",
+      () => {
+        this.globalFilters.push({
+          id: uid(),
+          property: this.inventory[0]?.name ?? "",
+          operator: "exists",
+        });
+        this.recomputeFilteredRows();
+        this.render();
+      },
+    );
+    this.iconButton(head, "Clear", "Clear all filters").addEventListener(
+      "click",
+      () => {
+        this.globalFilters = [];
+        for (const c of this.columns) c.filter = null;
+        this.recomputeFilteredRows();
+        this.render();
+      },
+    );
 
     const chips = bar.createDiv({ cls: "fm-editor-chip-list" });
     if (this.globalFilters.length === 0) {
       chips.createSpan({
-        text: "No global filters. Per-column filters can be added via the funnel icon in the table headers.",
+        text: "No filters. Click + Filter or use the funnel icon in a column header.",
         cls: "fm-editor-empty-hint",
       });
     } else {
       for (const f of this.globalFilters) {
-        this.renderGlobalChip(chips, f);
+        this.renderFilterChip(chips, f);
       }
     }
   }
 
-  private renderGlobalChip(parent: HTMLElement, filter: Filter): void {
+  private renderFilterChip(parent: HTMLElement, filter: Filter): void {
     const chip = parent.createDiv({ cls: "fm-editor-chip" });
-    const propSelect = chip.createEl("select", { cls: "fm-editor-chip-prop" });
-    const props = this.inventory.map((p) => p.name);
-    if (!props.includes(filter.property) && filter.property) {
-      props.unshift(filter.property);
-    }
-    for (const p of props) {
-      const o = propSelect.createEl("option", { value: p, text: p });
-      if (p === filter.property) o.selected = true;
-    }
-    propSelect.addEventListener("change", () => {
-      filter.property = propSelect.value;
-      this.recomputeFilteredRows();
-      this.render();
+
+    const propWrap = chip.createDiv({ cls: "fm-editor-chip-prop-wrap" });
+    const propCombo = new Combobox({
+      placeholder: "Property",
+      allowFreeform: true,
+      maxResults: 100,
+      onChange: (value) => {
+        filter.property = value;
+        if (filter.value !== undefined) filter.value = "";
+        this.recomputeFilteredRows();
+        this.render();
+      },
     });
+    propCombo.mount(propWrap, filter.property);
+    propCombo.setOptions(
+      this.inventory.map((p) => ({
+        value: p.name,
+        label: p.name,
+        hint: Array.from(p.types).join(" / "),
+        meta: String(p.count),
+      })),
+    );
 
     const opSelect = chip.createEl("select", { cls: "fm-editor-chip-op" });
     for (const op of FILTER_OPERATORS) {
@@ -338,41 +339,74 @@ export class FrontmatterEditorView extends ItemView {
     });
 
     if (operatorNeedsValue(filter.operator)) {
-      const valInput = chip.createEl("input", {
-        type: "text",
-        cls: "fm-editor-chip-value",
+      const valWrap = chip.createDiv({ cls: "fm-editor-chip-value-wrap" });
+      const valCombo = new Combobox({
         placeholder: "value",
+        allowFreeform: true,
+        maxResults: 60,
+        emptyMessage: "Type to use as custom value",
+        onChange: (value) => {
+          filter.value = value;
+          this.recomputeFilteredRows();
+          this.render();
+        },
       });
-      valInput.value = filter.value ?? "";
-      valInput.addEventListener("change", () => {
-        filter.value = valInput.value;
-        this.recomputeFilteredRows();
-        this.render();
-      });
-      valInput.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") valInput.blur();
-      });
+      valCombo.mount(valWrap, filter.value ?? "");
+      const values = this.plugin.scanner.getPropertyValues(
+        this.allRows,
+        filter.property,
+        80,
+      );
+      valCombo.setOptions(
+        values.map((v) => ({
+          value: v.value,
+          label: v.value,
+          meta: String(v.count),
+        })),
+      );
     }
 
     const csLabel = chip.createEl("label", { cls: "fm-editor-chip-cs" });
     const csInput = csLabel.createEl("input", { type: "checkbox" });
     csInput.checked = !!filter.caseSensitive;
     csLabel.appendText("Aa");
+    csLabel.title = "Case sensitive";
     csInput.addEventListener("change", () => {
       filter.caseSensitive = csInput.checked;
       this.recomputeFilteredRows();
       this.render();
     });
 
+    const matchCount = this.countMatchesForFilter(filter);
+    const badge = chip.createSpan({ cls: "fm-editor-chip-badge" });
+    badge.setText(`${matchCount}`);
+    badge.title = `${matchCount} notes match this filter on its own`;
+
     const remove = chip.createEl("button", {
       text: "x",
       cls: "fm-editor-chip-remove",
     });
+    remove.title = "Remove this filter";
     remove.addEventListener("click", () => {
       this.globalFilters = this.globalFilters.filter((x) => x.id !== filter.id);
       this.recomputeFilteredRows();
       this.render();
     });
+  }
+
+  private countMatchesForFilter(filter: Filter): number {
+    if (!filter.property) return 0;
+    if (
+      operatorNeedsValue(filter.operator) &&
+      (!filter.value || filter.value.length === 0)
+    ) {
+      return 0;
+    }
+    let count = 0;
+    for (const row of this.allRows) {
+      if (evaluateFilter(filter, row)) count++;
+    }
+    return count;
   }
 
   private renderResultsTable(parent: HTMLElement): void {
@@ -417,6 +451,17 @@ export class FrontmatterEditorView extends ItemView {
       this.renderColumnHeader(headRow, col, index);
     });
 
+    const addTh = headRow.createEl("th", { cls: "fm-editor-col-add" });
+    const addBtn = addTh.createEl("button", {
+      cls: "fm-editor-col-add-btn",
+      text: "+",
+    });
+    addBtn.title = "Add property column";
+    addBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      this.openPropertyPicker(addBtn);
+    });
+
     const tbody = table.createEl("tbody");
     const shown = this.filteredRows.slice(0, MAX_VISIBLE_ROWS);
     for (const row of shown) {
@@ -451,6 +496,7 @@ export class FrontmatterEditorView extends ItemView {
           void this.app.workspace.openLinkText(linkText, row.path, false);
         });
       }
+      tr.createEl("td", { cls: "fm-editor-col-add" });
     }
 
     if (this.filteredRows.length > MAX_VISIBLE_ROWS) {
@@ -574,25 +620,33 @@ export class FrontmatterEditorView extends ItemView {
     if (operatorNeedsValue(filter.operator)) {
       const valRow = pop.createDiv({ cls: "fm-editor-popover-row" });
       valRow.createEl("label", { text: "Value" });
-      const valInput = valRow.createEl("input", {
-        type: "text",
+      const valWrap = valRow.createDiv({ cls: "fm-editor-popover-input-wrap" });
+      const valCombo = new Combobox({
         placeholder: "value",
+        allowFreeform: true,
+        maxResults: 60,
+        onChange: (value) => {
+          filter.value = value;
+          filter.property = col.property;
+          col.filter = filter;
+          this.recomputeFilteredRows();
+          this.render();
+        },
       });
-      valInput.value = filter.value ?? "";
-      const apply = () => {
-        filter.value = valInput.value;
-        filter.property = col.property;
-        col.filter = filter;
-        this.recomputeFilteredRows();
-        this.render();
-      };
-      valInput.addEventListener("change", apply);
-      valInput.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") {
-          apply();
-        }
-      });
-      window.setTimeout(() => valInput.focus(), 0);
+      valCombo.mount(valWrap, filter.value ?? "");
+      const values = this.plugin.scanner.getPropertyValues(
+        this.allRows,
+        col.property,
+        80,
+      );
+      valCombo.setOptions(
+        values.map((v) => ({
+          value: v.value,
+          label: v.value,
+          meta: String(v.count),
+        })),
+      );
+      window.setTimeout(() => valCombo.focus(), 0);
     }
 
     const csRow = pop.createDiv({ cls: "fm-editor-popover-row" });
@@ -619,7 +673,7 @@ export class FrontmatterEditorView extends ItemView {
       this.render();
     });
     const closeBtn = actions.createEl("button", {
-      text: "Close",
+      text: "Done",
       cls: "fm-editor-btn fm-editor-btn-primary",
     });
     closeBtn.addEventListener("click", () => {
@@ -731,6 +785,19 @@ export class FrontmatterEditorView extends ItemView {
         : "fm-editor-btn",
     });
     btn.addEventListener("click", () => cb());
+    return btn;
+  }
+
+  private iconButton(
+    parent: HTMLElement,
+    label: string,
+    title: string,
+  ): HTMLButtonElement {
+    const btn = parent.createEl("button", {
+      text: label,
+      cls: "fm-editor-btn fm-editor-icon-btn",
+    });
+    btn.title = title;
     return btn;
   }
 }

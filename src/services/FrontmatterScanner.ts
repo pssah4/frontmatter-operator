@@ -103,4 +103,29 @@ export class FrontmatterScanner {
   buildAllRows(): NoteRow[] {
     return this.buildRows(this.getAllMarkdownFiles());
   }
+
+  getPropertyValues(
+    rows: NoteRow[],
+    property: string,
+    limit = 200,
+  ): Array<{ value: string; count: number }> {
+    const counter = new Map<string, number>();
+    for (const row of rows) {
+      const v = row.frontmatter[property];
+      if (v === undefined || v === null) continue;
+      if (Array.isArray(v)) {
+        for (const item of v) {
+          const s = typeof item === "string" ? item : String(item);
+          counter.set(s, (counter.get(s) ?? 0) + 1);
+        }
+      } else {
+        const s = typeof v === "string" ? v : String(v);
+        counter.set(s, (counter.get(s) ?? 0) + 1);
+      }
+    }
+    return Array.from(counter.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+      .slice(0, limit);
+  }
 }
