@@ -71,6 +71,65 @@ describe("applyActionPure", () => {
     });
   });
 
+  describe("set with template", () => {
+    it("resolves single-substitution template to raw value", () => {
+      const out = applyActionPure(
+        { Thema: "Reise", other: 1 },
+        {
+          type: "set",
+          property: "moc",
+          value: "{{Thema}}",
+          mode: "overwrite",
+          template: true,
+        },
+      );
+      expect(out.changed).toBe(true);
+      expect(out.after.moc).toBe("Reise");
+    });
+
+    it("preserves list type for single substitution", () => {
+      const out = applyActionPure(
+        { tags: ["a", "b", "c"] },
+        {
+          type: "set",
+          property: "topics",
+          value: "{{tags}}",
+          mode: "overwrite",
+          template: true,
+        },
+      );
+      expect(out.after.topics).toEqual(["a", "b", "c"]);
+    });
+
+    it("concatenates multi-substitution to string", () => {
+      const out = applyActionPure(
+        { first: "John", last: "Doe" },
+        {
+          type: "set",
+          property: "display",
+          value: "{{first}} {{last}}",
+          mode: "overwrite",
+          template: true,
+        },
+      );
+      expect(out.after.display).toBe("John Doe");
+    });
+
+    it("skips when template resolves to empty", () => {
+      const out = applyActionPure(
+        { other: 1 },
+        {
+          type: "set",
+          property: "moc",
+          value: "{{missing}}",
+          mode: "overwrite",
+          template: true,
+        },
+      );
+      expect(out.changed).toBe(false);
+    });
+  });
+
   describe("rename / copy / move", () => {
     it("rename moves value and removes source", () => {
       const out = applyActionPure(

@@ -1,4 +1,4 @@
-import type { FmValue } from "../types";
+import type { FmValue, Frontmatter } from "../types";
 
 const BOOL_TRUE = new Set(["true", "yes", "on", "1"]);
 const BOOL_FALSE = new Set(["false", "no", "off", "0"]);
@@ -10,7 +10,31 @@ export type ValueKind =
   | "null"
   | "list"
   | "wikilink"
+  | "template"
   | "auto";
+
+const SINGLE_TEMPLATE_RE = /^\{\{\s*([^{}]+?)\s*\}\}$/;
+const ANY_TEMPLATE_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
+
+export function isTemplateString(raw: string): boolean {
+  return ANY_TEMPLATE_RE.test(raw);
+}
+
+export function resolveTemplate(template: string, fm: Frontmatter): FmValue {
+  const single = template.match(SINGLE_TEMPLATE_RE);
+  if (single) {
+    const key = single[1].trim();
+    const v = fm[key];
+    return v === undefined ? null : v;
+  }
+  return template.replace(ANY_TEMPLATE_RE, (_match, key) => {
+    const v = fm[key.trim()];
+    if (v === undefined || v === null) return "";
+    if (Array.isArray(v)) return v.map((x) => String(x)).join(", ");
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
+  });
+}
 
 export function parseValue(raw: string, kind: ValueKind = "auto"): FmValue {
   const trimmed = raw.trim();
@@ -31,6 +55,9 @@ export function parseValue(raw: string, kind: ValueKind = "auto"): FmValue {
   }
   if (kind === "list") {
     return splitList(raw);
+  }
+  if (kind === "template") {
+    return raw;
   }
 
   if (trimmed === "") return raw;

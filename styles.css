@@ -239,14 +239,26 @@
   background: var(--background-modifier-active-hover);
 }
 
+.fm-editor-col-head-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
 .fm-editor-col-head-label {
   display: inline-flex;
   align-items: center;
   cursor: pointer;
+  flex: 1;
+  min-width: 0;
 }
 
 .fm-editor-col-head-name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fm-editor-col-sort-ind {
@@ -255,34 +267,79 @@
   margin-left: 2px;
 }
 
-.fm-editor-col-head-actions {
-  display: inline-flex;
-  gap: 2px;
-  margin-left: 6px;
-  opacity: 0.4;
+.fm-editor-col-filter-dot {
+  color: var(--interactive-accent);
+  margin-left: 4px;
+  font-weight: 700;
 }
 
-.fm-editor-col-head:hover .fm-editor-col-head-actions,
-.fm-editor-col-head.fm-editor-col-filtered .fm-editor-col-head-actions {
+.fm-editor-col-caret {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9em;
+  padding: 0 4px;
+  border-radius: 3px;
+  opacity: 0.5;
+}
+
+.fm-editor-col-head:hover .fm-editor-col-caret,
+.fm-editor-col-head.fm-editor-col-filtered .fm-editor-col-caret,
+.fm-editor-col-head.fm-editor-col-sorted .fm-editor-col-caret {
   opacity: 1;
 }
 
-.fm-editor-col-icon-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-family: var(--font-monospace);
-  font-size: 0.85em;
-  padding: 0 4px;
-  line-height: 1.3;
-}
-
-.fm-editor-col-icon-btn:hover {
+.fm-editor-col-caret:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
-  border-color: var(--background-modifier-border);
+}
+
+.fm-editor-col-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 70;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  min-width: 220px;
+  padding: 4px 0;
+  cursor: default;
+}
+
+.fm-editor-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.fm-editor-menu-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.fm-editor-menu-item-active {
+  color: var(--interactive-accent);
+}
+
+.fm-editor-menu-check {
+  width: 12px;
+  display: inline-block;
+  color: var(--interactive-accent);
+}
+
+.fm-editor-menu-label {
+  flex: 1;
+}
+
+.fm-editor-menu-divider {
+  height: 1px;
+  background: var(--background-modifier-border);
+  margin: 4px 0;
 }
 
 .fm-editor-col-popover {
@@ -481,10 +538,94 @@
   padding: 4px 8px;
 }
 
+.fm-editor-modal-hint {
+  margin: 6px 0;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  font-size: 0.9em;
+  color: var(--text-muted);
+  border-radius: 3px;
+}
+
+.fm-editor-modal-chips {
+  margin: 4px 0 8px;
+}
+
+.fm-editor-modal-chips-label {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.fm-editor-modal-chips-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 110px;
+  overflow-y: auto;
+}
+
+.fm-editor-modal-chips-list .fm-editor-pill {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-family: var(--font-monospace);
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.fm-editor-modal-chips-list .fm-editor-pill:hover {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
 .fm-editor-modal-status {
   color: var(--text-muted);
   font-style: italic;
   margin: 4px 0;
+}
+
+.fm-editor-help-intro {
+  margin-bottom: 12px;
+}
+
+.fm-editor-help-list {
+  max-height: 520px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fm-editor-help-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+}
+
+.fm-editor-help-card h3 {
+  margin: 0 0 4px;
+  font-size: var(--font-ui-small);
+  color: var(--interactive-accent);
+}
+
+.fm-editor-help-goal {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.fm-editor-help-card ol {
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--font-ui-small);
+}
+
+.fm-editor-help-card ol li {
+  margin: 3px 0;
 }
 
 .fm-editor-modal-preview {

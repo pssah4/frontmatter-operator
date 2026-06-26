@@ -68,6 +68,7 @@ export interface SetAction {
   property: string;
   value: FmValue;
   mode: "overwrite" | "skip_if_exists" | "merge_list";
+  template?: boolean;
 }
 
 export interface DeleteAction {

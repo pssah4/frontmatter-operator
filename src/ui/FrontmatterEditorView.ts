@@ -17,6 +17,7 @@ import { SetActionModal } from "./modals/SetActionModal";
 import { DeleteActionModal } from "./modals/DeleteActionModal";
 import { TransformActionModal } from "./modals/TransformActionModal";
 import { SnapshotsModal } from "./modals/SnapshotsModal";
+import { HelpModal } from "./modals/HelpModal";
 import { Combobox } from "./components/Combobox";
 import {
   MultiSelectPopover,
@@ -161,8 +162,11 @@ export class FrontmatterEditorView extends ItemView {
       text: "Frontmatter Editor",
       cls: "fm-editor-title-text",
     });
+    const withFm = this.allRows.filter(
+      (r) => Object.keys(r.frontmatter).length > 0,
+    ).length;
     left.createSpan({
-      text: `${this.allRows.length} notes  ${this.inventory.length} properties`,
+      text: `${this.allRows.length} notes  ${withFm} w/ frontmatter  ${this.inventory.length} properties`,
       cls: "fm-editor-subtitle",
     });
 
@@ -188,6 +192,9 @@ export class FrontmatterEditorView extends ItemView {
         }).open();
       },
     );
+    this.iconButton(right, "?", "How to use").addEventListener("click", () => {
+      new HelpModal(this.app).open();
+    });
   }
 
   private openPropertyPicker(anchor: HTMLElement): void {
@@ -548,48 +555,151 @@ export class FrontmatterEditorView extends ItemView {
       this.render();
     });
 
-    const labelWrap = th.createDiv({ cls: "fm-editor-col-head-label" });
-    const nameEl = labelWrap.createSpan({
-      text: col.property,
-      cls: "fm-editor-col-head-name",
-    });
-    nameEl.title = "Click to sort, drag to reorder";
-    nameEl.addEventListener("click", () => {
+    const inner = th.createDiv({ cls: "fm-editor-col-head-inner" });
+
+    const nameWrap = inner.createDiv({ cls: "fm-editor-col-head-label" });
+    nameWrap.title = "Click to cycle sort  ·  drag to reorder";
+    nameWrap.addEventListener("click", (ev) => {
+      ev.stopPropagation();
       this.cycleSort(col);
     });
 
-    const indicator = labelWrap.createSpan({ cls: "fm-editor-col-sort-ind" });
-    if (col.sort === "asc") indicator.setText(" ▲");
-    else if (col.sort === "desc") indicator.setText(" ▼");
+    nameWrap.createSpan({
+      text: col.property,
+      cls: "fm-editor-col-head-name",
+    });
+    if (col.sort === "asc") {
+      nameWrap.createSpan({
+        cls: "fm-editor-col-sort-ind",
+        text: " ↑",
+      });
+    } else if (col.sort === "desc") {
+      nameWrap.createSpan({
+        cls: "fm-editor-col-sort-ind",
+        text: " ↓",
+      });
+    }
+    if (col.filter) {
+      const dot = nameWrap.createSpan({
+        cls: "fm-editor-col-filter-dot",
+        text: " •",
+      });
+      dot.title = "Filter active";
+    }
 
-    const actions = th.createDiv({ cls: "fm-editor-col-head-actions" });
-    const filterBtn = actions.createEl("button", {
-      cls: "fm-editor-col-icon-btn",
-      text: col.filter ? "*" : "f",
+    const caret = inner.createEl("button", {
+      cls: "fm-editor-col-caret",
+      text: "▾",
     });
-    filterBtn.title = col.filter ? "Edit column filter" : "Filter this column";
-    filterBtn.addEventListener("click", (ev) => {
+    caret.title = "Column options";
+    caret.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      this.openFilterPopoverFor =
-        this.openFilterPopoverFor === col.property ? null : col.property;
-      this.render();
+      this.openColumnMenu(th, col, index);
     });
 
-    const removeBtn = actions.createEl("button", {
-      cls: "fm-editor-col-icon-btn",
-      text: "x",
-    });
-    removeBtn.title = "Hide this column";
-    removeBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      this.columns.splice(index, 1);
-      this.recomputeFilteredRows();
-      this.render();
+    th.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      this.openColumnMenu(th, col, index);
     });
 
     if (this.openFilterPopoverFor === col.property) {
       this.renderColumnFilterPopover(th, col);
     }
+  }
+
+  private openColumnMenu(
+    anchor: HTMLElement,
+    col: ColumnState,
+    index: number,
+  ): void {
+    this.containerEl
+      .querySelectorAll(".fm-editor-col-menu")
+      .forEach((e) => e.remove());
+
+    const menu = anchor.createDiv({ cls: "fm-editor-col-menu" });
+    menu.addEventListener("click", (ev) => ev.stopPropagation());
+
+    this.menuItem(menu, "Sort ascending", col.sort === "asc", () => {
+      col.sort = col.sort === "asc" ? null : "asc";
+      this.recomputeFilteredRows();
+      this.render();
+    });
+    this.menuItem(menu, "Sort descending", col.sort === "desc", () => {
+      col.sort = col.sort === "desc" ? null : "desc";
+      this.recomputeFilteredRows();
+      this.render();
+    });
+    if (col.sort !== null) {
+      this.menuItem(menu, "Clear sort", false, () => {
+        col.sort = null;
+        this.recomputeFilteredRows();
+        this.render();
+      });
+    }
+
+    this.menuDivider(menu);
+    this.menuItem(
+      menu,
+      col.filter ? "Edit column filter..." : "Filter this column...",
+      !!col.filter,
+      () => {
+        this.openFilterPopoverFor = col.property;
+        this.render();
+      },
+    );
+    if (col.filter) {
+      this.menuItem(menu, "Clear column filter", false, () => {
+        col.filter = null;
+        this.recomputeFilteredRows();
+        this.render();
+      });
+    }
+
+    this.menuDivider(menu);
+    this.menuItem(menu, "Hide column", false, () => {
+      this.columns.splice(index, 1);
+      this.recomputeFilteredRows();
+      this.render();
+    });
+
+    const closeOnOutside = (ev: MouseEvent) => {
+      if (!menu.contains(ev.target as Node)) {
+        menu.remove();
+        document.removeEventListener("mousedown", closeOnOutside);
+        document.removeEventListener("keydown", closeOnEsc);
+      }
+    };
+    const closeOnEsc = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        menu.remove();
+        document.removeEventListener("mousedown", closeOnOutside);
+        document.removeEventListener("keydown", closeOnEsc);
+      }
+    };
+    window.setTimeout(() => {
+      document.addEventListener("mousedown", closeOnOutside);
+      document.addEventListener("keydown", closeOnEsc);
+    }, 0);
+  }
+
+  private menuItem(
+    parent: HTMLElement,
+    label: string,
+    active: boolean,
+    onClick: () => void,
+  ): void {
+    const item = parent.createDiv({ cls: "fm-editor-menu-item" });
+    if (active) item.addClass("fm-editor-menu-item-active");
+    item.createSpan({ cls: "fm-editor-menu-check", text: active ? "✓" : " " });
+    item.createSpan({ cls: "fm-editor-menu-label", text: label });
+    item.addEventListener("click", () => {
+      parent.remove();
+      onClick();
+    });
+  }
+
+  private menuDivider(parent: HTMLElement): void {
+    parent.createDiv({ cls: "fm-editor-menu-divider" });
   }
 
   private renderColumnFilterPopover(parent: HTMLElement, col: ColumnState): void {

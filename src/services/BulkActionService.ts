@@ -7,7 +7,7 @@ import type {
   NoteRow,
   Snapshot,
 } from "../types";
-import { mergeListValues } from "./ValueCoercion";
+import { mergeListValues, resolveTemplate } from "./ValueCoercion";
 import type { SnapshotService } from "./SnapshotService";
 
 function cloneFrontmatter(fm: Frontmatter): Frontmatter {
@@ -33,13 +33,23 @@ export function applyActionPure(
       if (exists && action.mode === "skip_if_exists") {
         return { after, changed: false, skipped: "property already set" };
       }
+      const resolved = action.template && typeof action.value === "string"
+        ? resolveTemplate(action.value, fm)
+        : action.value;
+      if (action.template && (resolved === null || resolved === "")) {
+        return {
+          after,
+          changed: false,
+          skipped: "template resolves to empty",
+        };
+      }
       if (exists && action.mode === "merge_list") {
         after[action.property] = mergeListValues(
           after[action.property],
-          action.value,
+          resolved,
         );
       } else {
-        after[action.property] = action.value;
+        after[action.property] = resolved;
       }
       return {
         after,
@@ -228,13 +238,17 @@ export class BulkActionService {
             action.property,
           );
           if (exists && action.mode === "skip_if_exists") return;
+          const resolved = action.template && typeof action.value === "string"
+            ? resolveTemplate(action.value, fm as never)
+            : action.value;
+          if (action.template && (resolved === null || resolved === "")) return;
           if (exists && action.mode === "merge_list") {
             fm[action.property] = mergeListValues(
               fm[action.property] as never,
-              action.value,
+              resolved,
             );
           } else {
-            fm[action.property] = action.value;
+            fm[action.property] = resolved;
           }
           return;
         }

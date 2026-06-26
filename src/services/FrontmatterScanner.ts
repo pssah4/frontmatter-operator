@@ -89,12 +89,11 @@ export class FrontmatterScanner {
     const rows: NoteRow[] = [];
     for (const file of files) {
       const fm = this.readFrontmatter(file);
-      if (!fm) continue;
       rows.push({
         file,
         path: file.path,
         basename: file.basename,
-        frontmatter: fm,
+        frontmatter: fm ?? {},
       });
     }
     return rows;
