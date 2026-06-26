@@ -1,3 +1,4 @@
+import { Setting } from "obsidian";
 import type { BulkAction } from "../../types";
 import { parseValue, type ValueKind } from "../../services/ValueCoercion";
 import { BaseActionModal } from "./BaseActionModal";
@@ -14,15 +15,15 @@ const KINDS: ValueKind[] = [
 ];
 
 const KIND_HINTS: Record<ValueKind, string> = {
-  auto: "Auto: detect type from input (numbers, booleans, lists, ...).",
-  string: "Force string.",
-  number: "Force number.",
-  boolean: "Force true/false.",
-  null: "Set to null.",
-  list: "Force list. Split by commas.",
-  wikilink: "Wrap value in [[ ]] if missing.",
+  auto: "Auto-detects type from input. Numbers, booleans and lists are parsed; everything else stays a string.",
+  string: "Forces the value to a string.",
+  number: "Forces the value to a number.",
+  boolean: "Forces true/false.",
+  null: "Sets the property to null.",
+  list: "Forces a list. Items split by commas; quotes preserved.",
+  wikilink: "Wraps the value in [[ ]] if missing.",
   template:
-    "Template. Use {{otherProperty}} to copy values per-note. Example: {{Thema}} writes the value of Thema into the target property.",
+    'Treats the value as a template. Use {{otherProperty}} to copy values per note. Example: {{Thema}} copies Thema into the target property.',
 };
 
 export class SetActionModal extends BaseActionModal {
@@ -40,71 +41,70 @@ export class SetActionModal extends BaseActionModal {
   }
 
   protected buildForm(container: HTMLElement): void {
-    const propRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    propRow.createEl("label", { text: "Property" });
-    const propInput = propRow.createEl("input", {
-      type: "text",
-      placeholder: "e.g. type",
-    });
-    propInput.setAttribute("list", "fm-editor-set-prop-list");
-    propInput.addEventListener("input", () => {
-      this.property = propInput.value;
-    });
-    this.propertyDatalist(propRow, "fm-editor-set-prop-list");
+    new Setting(container)
+      .setName("Property")
+      .setDesc("The frontmatter key to set.")
+      .addText((text) => {
+        text
+          .setPlaceholder("e.g. type")
+          .onChange((value) => {
+            this.property = value;
+          });
+        text.inputEl.setAttribute("list", "fm-editor-set-prop-list");
+      })
+      .then((s) => this.propertyDatalist(s.controlEl, "fm-editor-set-prop-list"));
 
-    const valRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    valRow.createEl("label", { text: "Value" });
-    const valInput = valRow.createEl("input", {
-      type: "text",
-      placeholder: "e.g. person  or  [[Some Note]]  or  {{Thema}}",
-    });
-    valInput.addEventListener("input", () => {
-      this.rawValue = valInput.value;
-    });
-    this.valueInput = valInput;
+    new Setting(container)
+      .setName("Value")
+      .setDesc(
+        "Literal value, or a template like {{Thema}} if Type is set to template.",
+      )
+      .addText((text) => {
+        text
+          .setPlaceholder("e.g. person  ·  [[Some Note]]  ·  {{Thema}}")
+          .onChange((value) => {
+            this.rawValue = value;
+          });
+        this.valueInput = text.inputEl;
+      });
 
-    const kindRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    kindRow.createEl("label", { text: "Type" });
-    const kindSel = kindRow.createEl("select");
-    for (const k of KINDS) {
-      const o = kindSel.createEl("option", { value: k, text: k });
-      if (k === this.kind) o.selected = true;
-    }
-    kindSel.addEventListener("change", () => {
-      this.kind = kindSel.value as ValueKind;
-      this.updateHint();
-      this.updateChips();
-    });
+    new Setting(container)
+      .setName("Type")
+      .setDesc("How to interpret the value.")
+      .addDropdown((d) => {
+        for (const k of KINDS) d.addOption(k, k);
+        d.setValue(this.kind);
+        d.onChange((value) => {
+          this.kind = value as ValueKind;
+          this.updateHint();
+          this.updateChips();
+        });
+      });
 
-    const modeRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    modeRow.createEl("label", { text: "On conflict" });
-    const modeSel = modeRow.createEl("select");
-    for (const m of ["overwrite", "skip_if_exists", "merge_list"] as const) {
-      const o = modeSel.createEl("option", { value: m, text: m });
-      if (m === this.mode) o.selected = true;
-    }
-    modeSel.addEventListener("change", () => {
-      this.mode = modeSel.value as typeof this.mode;
-    });
+    new Setting(container)
+      .setName("On conflict")
+      .setDesc("What to do when the property already exists.")
+      .addDropdown((d) => {
+        d.addOption("overwrite", "overwrite");
+        d.addOption("skip_if_exists", "skip if exists");
+        d.addOption("merge_list", "merge into list");
+        d.setValue(this.mode);
+        d.onChange((value) => {
+          this.mode = value as typeof this.mode;
+        });
+      });
 
-    const wlRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    wlRow.createEl("label", { text: "Wrap as wikilink" });
-    const wlLabel = wlRow.createEl("label", {
-      cls: "fm-editor-checkbox-line",
-    });
-    const wlCheck = wlLabel.createEl("input", { type: "checkbox" });
-    wlCheck.checked = this.wrapWikilink;
-    wlLabel.appendText(" Convert the resolved value to [[wikilink]] if not already");
-    wlCheck.addEventListener("change", () => {
-      this.wrapWikilink = wlCheck.checked;
-    });
+    new Setting(container)
+      .setName("Wrap as wikilink")
+      .setDesc("Convert the resolved value to [[wikilink]] if it isn't already.")
+      .addToggle((t) => {
+        t.setValue(this.wrapWikilink).onChange((v) => {
+          this.wrapWikilink = v;
+        });
+      });
 
-    this.hintEl = container.createDiv({
-      cls: "fm-editor-modal-hint",
-    });
-    this.chipsEl = container.createDiv({
-      cls: "fm-editor-modal-chips",
-    });
+    this.hintEl = container.createDiv({ cls: "fm-editor-modal-hint" });
+    this.chipsEl = container.createDiv({ cls: "fm-editor-modal-chips" });
     this.updateHint();
     this.updateChips();
   }
@@ -119,15 +119,15 @@ export class SetActionModal extends BaseActionModal {
     this.chipsEl.empty();
     if (this.kind !== "template") return;
 
-    const label = this.chipsEl.createDiv({
+    this.chipsEl.createDiv({
       cls: "fm-editor-modal-chips-label",
+      text: "Click to insert a property reference:",
     });
-    label.setText("Insert property reference:");
     const list = this.chipsEl.createDiv({ cls: "fm-editor-modal-chips-list" });
     const items = this.inventory.slice(0, 40);
     for (const p of items) {
       const chip = list.createEl("button", {
-        cls: "fm-editor-pill fm-editor-pill-link",
+        cls: "fm-editor-pill",
         text: p.name,
       });
       chip.title = `Insert {{${p.name}}} at cursor`;

@@ -1,4 +1,4 @@
-import { App, Modal, Notice } from "obsidian";
+import { App, Modal, Notice, setIcon } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import type { Snapshot } from "../../types";
 
@@ -12,13 +12,14 @@ export class SnapshotsModal extends Modal {
   }
 
   async onOpen(): Promise<void> {
-    const { contentEl } = this;
+    const { contentEl, titleEl } = this;
     contentEl.empty();
-    contentEl.addClass("fm-editor-modal");
-    contentEl.createEl("h2", { text: "Snapshots" });
+    contentEl.addClass("fm-editor-modal-content");
+    titleEl.setText("Snapshots");
+
     contentEl.createDiv({
-      cls: "fm-editor-empty-hint",
-      text: "Each bulk action writes a JSON snapshot to .frontmatter-editor/snapshots/. Restore reverts the affected notes to their previous frontmatter.",
+      cls: "fm-editor-modal-hint",
+      text: "Every bulk action writes a JSON snapshot under .frontmatter-editor/snapshots/. Restore reverts the affected notes to their previous frontmatter. The 50 most recent snapshots are kept.",
     });
 
     const list = contentEl.createDiv({ cls: "fm-editor-snapshot-list" });
@@ -26,7 +27,7 @@ export class SnapshotsModal extends Modal {
     if (snaps.length === 0) {
       list.createDiv({
         cls: "fm-editor-empty-hint",
-        text: "No snapshots yet.",
+        text: "No snapshots yet — run an action to record the first one.",
       });
       return;
     }
@@ -39,20 +40,21 @@ export class SnapshotsModal extends Modal {
     const row = parent.createDiv({ cls: "fm-editor-snapshot-row" });
     const head = row.createDiv({ cls: "fm-editor-snapshot-head" });
     head.createSpan({
-      text: `${snap.id}  --  ${snap.entries.length} notes`,
+      text: snap.id,
       cls: "fm-editor-snapshot-id",
     });
     head.createSpan({
-      text: ` (${describeAction(snap.action)})`,
+      text: `${describeAction(snap.action)} · ${snap.entries.length} ${snap.entries.length === 1 ? "note" : "notes"}`,
       cls: "fm-editor-snapshot-action",
     });
 
     const actions = row.createDiv({ cls: "fm-editor-snapshot-actions" });
 
     const restoreBtn = actions.createEl("button", {
-      text: "Restore",
-      cls: "fm-editor-btn fm-editor-btn-primary",
+      cls: "fm-editor-btn mod-cta",
     });
+    setIcon(restoreBtn.createSpan(), "undo-2");
+    restoreBtn.createSpan({ text: "Restore" });
     restoreBtn.addEventListener("click", async () => {
       if (
         !confirm(
@@ -69,9 +71,10 @@ export class SnapshotsModal extends Modal {
     });
 
     const delBtn = actions.createEl("button", {
-      text: "Delete",
-      cls: "fm-editor-btn",
+      cls: "fm-editor-icon-btn mod-warning",
     });
+    setIcon(delBtn, "trash-2");
+    delBtn.title = "Delete this snapshot";
     delBtn.addEventListener("click", async () => {
       if (!confirm("Delete this snapshot?")) return;
       await this.plugin.snapshots.delete(snap.id);
@@ -88,7 +91,7 @@ export class SnapshotsModal extends Modal {
 function describeAction(action: Snapshot["action"]): string {
   switch (action.type) {
     case "set":
-      return `set ${action.property} = ${JSON.stringify(action.value)} (${action.mode})`;
+      return `set ${action.property} = ${JSON.stringify(action.value)}`;
     case "delete":
       return `delete ${action.property}`;
     case "rename":
@@ -98,7 +101,7 @@ function describeAction(action: Snapshot["action"]): string {
       const sources = action.fromProperties
         ? action.fromProperties.join(" + ")
         : (legacy ?? "?");
-      return `${action.type} ${sources} -> ${action.toProperty} (${action.onConflict})`;
+      return `${action.type} ${sources} → ${action.toProperty}`;
     }
   }
 }

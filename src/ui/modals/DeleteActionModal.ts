@@ -1,3 +1,4 @@
+import { Setting } from "obsidian";
 import type { BulkAction } from "../../types";
 import { BaseActionModal } from "./BaseActionModal";
 
@@ -9,21 +10,22 @@ export class DeleteActionModal extends BaseActionModal {
   }
 
   protected buildForm(container: HTMLElement): void {
-    const row = container.createDiv({ cls: "fm-editor-modal-row" });
-    row.createEl("label", { text: "Property to delete" });
-    const input = row.createEl("input", {
-      type: "text",
-      placeholder: "e.g. tags-old",
-    });
-    input.setAttribute("list", "fm-editor-del-prop-list");
-    input.addEventListener("input", () => {
-      this.property = input.value;
-    });
-    this.propertyDatalist(row, "fm-editor-del-prop-list");
+    new Setting(container)
+      .setName("Property to delete")
+      .setDesc("Removes the property entirely from every matched note.")
+      .addText((text) => {
+        text
+          .setPlaceholder("e.g. tags-old")
+          .onChange((value) => {
+            this.property = value;
+          });
+        text.inputEl.setAttribute("list", "fm-editor-del-prop-list");
+      })
+      .then((s) => this.propertyDatalist(s.controlEl, "fm-editor-del-prop-list"));
 
     container.createDiv({
-      cls: "fm-editor-empty-hint",
-      text: "Removes the property entirely. Snapshot is written before changes so you can undo.",
+      cls: "fm-editor-modal-hint",
+      text: "A snapshot is written before the change, so you can undo from the toolbar or the Apply notice.",
     });
   }
 

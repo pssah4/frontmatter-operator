@@ -1,4 +1,4 @@
-import { App, Modal, Notice } from "obsidian";
+import { App, Modal, Notice, setIcon } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import type {
   ActionPreview,
@@ -12,6 +12,7 @@ const PREVIEW_LIMIT = 100;
 export abstract class BaseActionModal extends Modal {
   protected previewEl: HTMLElement | null = null;
   protected statusEl: HTMLElement | null = null;
+  protected applyBtn: HTMLButtonElement | null = null;
 
   constructor(
     app: App,
@@ -28,49 +29,62 @@ export abstract class BaseActionModal extends Modal {
   protected abstract buildAction(): BulkAction | { error: string };
 
   onOpen(): void {
-    const { contentEl } = this;
+    const { contentEl, titleEl } = this;
     contentEl.empty();
-    contentEl.addClass("fm-editor-modal");
-    contentEl.createEl("h2", { text: this.title() });
+    contentEl.addClass("fm-editor-modal-content");
+    titleEl.setText(this.title());
 
-    const target = contentEl.createDiv({ cls: "fm-editor-modal-target" });
-    target.createSpan({
-      cls: "fm-editor-modal-target-label",
-      text: "Rule target:",
-    });
-    target.createSpan({
-      cls: "fm-editor-modal-target-count",
-      text: `${this.targets.length} note${this.targets.length === 1 ? "" : "s"}`,
-    });
-    target.createSpan({
-      cls: "fm-editor-modal-target-hint",
-      text: "from the current filter selection. Cancel and adjust filters if this is wrong.",
-    });
+    this.renderTargetBanner(contentEl);
 
-    const form = contentEl.createDiv({ cls: "fm-editor-modal-form" });
+    const form = contentEl.createDiv();
     this.buildForm(form);
 
-    const previewBtnRow = contentEl.createDiv({ cls: "fm-editor-modal-row" });
+    const previewBtnRow = contentEl.createDiv();
     const previewBtn = previewBtnRow.createEl("button", {
-      text: "Preview changes",
       cls: "fm-editor-btn",
     });
+    setIcon(previewBtn.createSpan(), "eye");
+    previewBtn.createSpan({ text: "Preview changes" });
     previewBtn.addEventListener("click", () => this.runPreview());
 
     this.statusEl = contentEl.createDiv({ cls: "fm-editor-modal-status" });
     this.previewEl = contentEl.createDiv({ cls: "fm-editor-modal-preview" });
 
     const footer = contentEl.createDiv({ cls: "fm-editor-modal-footer" });
-    const cancelBtn = footer.createEl("button", {
+    const left = footer.createDiv({ cls: "fm-editor-modal-footer-left" });
+    const right = footer.createDiv({ cls: "fm-editor-modal-footer-right" });
+
+    const cancelBtn = right.createEl("button", {
       text: "Cancel",
       cls: "fm-editor-btn",
     });
     cancelBtn.addEventListener("click", () => this.close());
-    const applyBtn = footer.createEl("button", {
-      text: `Apply to ${this.targets.length} notes`,
-      cls: "fm-editor-btn fm-editor-btn-primary",
+
+    const applyBtn = right.createEl("button", {
+      cls: "fm-editor-btn mod-cta",
+    });
+    setIcon(applyBtn.createSpan(), "check");
+    applyBtn.createSpan({
+      text: `Apply rule to ${this.targets.length} ${this.targets.length === 1 ? "note" : "notes"}`,
     });
     applyBtn.addEventListener("click", () => this.runApply());
+    this.applyBtn = applyBtn;
+  }
+
+  private renderTargetBanner(parent: HTMLElement): void {
+    const banner = parent.createDiv({ cls: "fm-editor-modal-target" });
+    banner.createSpan({
+      cls: "fm-editor-modal-target-label",
+      text: "Rule target",
+    });
+    banner.createSpan({
+      cls: "fm-editor-modal-target-count",
+      text: `${this.targets.length} ${this.targets.length === 1 ? "note" : "notes"}`,
+    });
+    banner.createSpan({
+      cls: "fm-editor-modal-target-hint",
+      text: "Cancel and adjust the WHEN conditions if this is wrong.",
+    });
   }
 
   protected runPreview(): void {
@@ -121,7 +135,7 @@ export abstract class BaseActionModal extends Modal {
     el.createSpan({ text: `Frontmatter Editor: ${summary}` });
     if (!snapshotId) return;
     const undoBtn = el.createEl("button", {
-      text: " Undo",
+      text: "Undo",
       cls: "fm-editor-notice-undo",
     });
     undoBtn.addEventListener("click", async (ev) => {
@@ -153,19 +167,19 @@ export abstract class BaseActionModal extends Modal {
       cls: "fm-editor-preview-summary",
     });
     summary.setText(
-      `${changed.length} of ${previews.length} notes will change. ${skipped.length} will be skipped.`,
+      `${changed.length} of ${previews.length} notes will change · ${skipped.length} skipped.`,
     );
-    const list = this.previewEl.createDiv({ cls: "fm-editor-preview-list" });
+    const list = this.previewEl.createDiv();
     const shown = changed.slice(0, PREVIEW_LIMIT);
     for (const p of shown) {
       const row = list.createDiv({ cls: "fm-editor-preview-row" });
       row.createDiv({ cls: "fm-editor-preview-path", text: p.path });
       const diff = row.createDiv({ cls: "fm-editor-preview-diff" });
       const before = diff.createDiv({ cls: "fm-editor-preview-before" });
-      before.createSpan({ cls: "fm-editor-preview-label", text: "before " });
+      before.createSpan({ cls: "fm-editor-preview-label", text: "before" });
       before.createSpan({ text: JSON.stringify(p.before) });
       const after = diff.createDiv({ cls: "fm-editor-preview-after" });
-      after.createSpan({ cls: "fm-editor-preview-label", text: "after  " });
+      after.createSpan({ cls: "fm-editor-preview-label", text: "after" });
       after.createSpan({ text: JSON.stringify(p.after) });
     }
     if (changed.length > PREVIEW_LIMIT) {

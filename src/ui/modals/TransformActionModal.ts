@@ -1,3 +1,4 @@
+import { Setting, setIcon } from "obsidian";
 import type { BulkAction } from "../../types";
 import { BaseActionModal } from "./BaseActionModal";
 
@@ -10,40 +11,45 @@ export class TransformActionModal extends BaseActionModal {
   private onConflict: "skip" | "overwrite" | "merge_list" = "skip";
   private wrapWikilink = false;
   private chipsHostEl: HTMLElement | null = null;
-  private addInputEl: HTMLInputElement | null = null;
 
   protected title(): string {
-    return "Rename / Copy / Move";
+    return "Rename, copy or move properties";
   }
 
   protected buildForm(container: HTMLElement): void {
-    const modeRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    modeRow.createEl("label", { text: "Action" });
-    const modeSel = modeRow.createEl("select");
-    for (const m of ["rename", "copy", "move"] as const) {
-      const o = modeSel.createEl("option", { value: m, text: m });
-      if (m === this.mode) o.selected = true;
-    }
-    modeSel.addEventListener("change", () => {
-      this.mode = modeSel.value as Mode;
-    });
+    new Setting(container)
+      .setName("Action")
+      .setDesc(
+        "Rename / move delete the source(s) after copying. Copy keeps them.",
+      )
+      .addDropdown((d) => {
+        d.addOption("rename", "rename");
+        d.addOption("copy", "copy");
+        d.addOption("move", "move");
+        d.setValue(this.mode);
+        d.onChange((value) => {
+          this.mode = value as Mode;
+        });
+      });
 
-    const fromRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    fromRow.createEl("label", { text: "From properties" });
-    const fromWrap = fromRow.createDiv({ cls: "fm-editor-multi-source" });
+    const sourceSetting = new Setting(container)
+      .setName("From properties")
+      .setDesc("One or more source properties. Their values are merged into the target.");
+    const sourceControl = sourceSetting.controlEl;
+    sourceControl.addClass("fm-editor-multi-source");
 
-    this.chipsHostEl = fromWrap.createDiv({
+    this.chipsHostEl = sourceControl.createDiv({
       cls: "fm-editor-multi-source-chips",
     });
 
-    const addWrap = fromWrap.createDiv({ cls: "fm-editor-multi-source-add" });
+    const addWrap = sourceControl.createDiv({ cls: "fm-editor-multi-source-add" });
     const addInput = addWrap.createEl("input", {
       type: "text",
-      placeholder: "Add source property, then Enter",
+      cls: "fm-editor-filter-input",
+      placeholder: "Type property name, then Enter",
     });
     addInput.setAttribute("list", "fm-editor-multi-from-list");
     this.propertyDatalist(addWrap, "fm-editor-multi-from-list");
-    this.addInputEl = addInput;
     addInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         ev.preventDefault();
@@ -52,9 +58,10 @@ export class TransformActionModal extends BaseActionModal {
       }
     });
     const addBtn = addWrap.createEl("button", {
-      text: "Add",
       cls: "fm-editor-btn",
     });
+    setIcon(addBtn.createSpan(), "plus");
+    addBtn.createSpan({ text: "Add" });
     addBtn.addEventListener("click", (ev) => {
       ev.preventDefault();
       this.addFrom(addInput.value);
@@ -63,44 +70,44 @@ export class TransformActionModal extends BaseActionModal {
     });
     this.renderChips();
 
-    const toRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    toRow.createEl("label", { text: "To property" });
-    const toInput = toRow.createEl("input", {
-      type: "text",
-      placeholder: "e.g. description",
-    });
-    toInput.setAttribute("list", "fm-editor-rename-to-list");
-    toInput.addEventListener("input", () => {
-      this.toProperty = toInput.value;
-    });
-    this.propertyDatalist(toRow, "fm-editor-rename-to-list");
+    new Setting(container)
+      .setName("To property")
+      .setDesc("The destination property name.")
+      .addText((text) => {
+        text
+          .setPlaceholder("e.g. description")
+          .onChange((value) => {
+            this.toProperty = value;
+          });
+        text.inputEl.setAttribute("list", "fm-editor-rename-to-list");
+      })
+      .then((s) => this.propertyDatalist(s.controlEl, "fm-editor-rename-to-list"));
 
-    const conflictRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    conflictRow.createEl("label", { text: "If target exists" });
-    const conflictSel = conflictRow.createEl("select");
-    for (const c of ["skip", "overwrite", "merge_list"] as const) {
-      const o = conflictSel.createEl("option", { value: c, text: c });
-      if (c === this.onConflict) o.selected = true;
-    }
-    conflictSel.addEventListener("change", () => {
-      this.onConflict = conflictSel.value as typeof this.onConflict;
-    });
+    new Setting(container)
+      .setName("If target exists")
+      .setDesc("How to handle notes where the target property already has a value.")
+      .addDropdown((d) => {
+        d.addOption("skip", "skip");
+        d.addOption("overwrite", "overwrite");
+        d.addOption("merge_list", "merge into list");
+        d.setValue(this.onConflict);
+        d.onChange((value) => {
+          this.onConflict = value as typeof this.onConflict;
+        });
+      });
 
-    const wlRow = container.createDiv({ cls: "fm-editor-modal-row" });
-    wlRow.createEl("label", { text: "Wrap as wikilink" });
-    const wlLabel = wlRow.createEl("label", {
-      cls: "fm-editor-checkbox-line",
-    });
-    const wlCheck = wlLabel.createEl("input", { type: "checkbox" });
-    wlCheck.checked = this.wrapWikilink;
-    wlLabel.appendText(" Convert values to [[wikilinks]] before writing");
-    wlCheck.addEventListener("change", () => {
-      this.wrapWikilink = wlCheck.checked;
-    });
+    new Setting(container)
+      .setName("Wrap as wikilink")
+      .setDesc("Convert values to [[wikilink]] before writing. Existing wikilinks pass through.")
+      .addToggle((t) => {
+        t.setValue(this.wrapWikilink).onChange((v) => {
+          this.wrapWikilink = v;
+        });
+      });
 
     container.createDiv({
-      cls: "fm-editor-empty-hint",
-      text: "Multiple source properties are merged into the target. rename and move delete the sources afterwards; copy keeps them. Existing wikilinks stay as-is.",
+      cls: "fm-editor-modal-hint",
+      text: "Multiple sources are merged into the target (lists deduped). For rename and move, the sources are deleted afterwards; for copy they are kept.",
     });
   }
 
@@ -132,9 +139,9 @@ export class TransformActionModal extends BaseActionModal {
       const chip = host.createSpan({ cls: "fm-editor-pill fm-editor-pill-link" });
       chip.createSpan({ text: name });
       const x = chip.createEl("button", {
-        text: "x",
         cls: "fm-editor-chip-remove",
       });
+      setIcon(x, "x");
       x.title = "Remove source";
       x.addEventListener("click", (ev) => {
         ev.preventDefault();
