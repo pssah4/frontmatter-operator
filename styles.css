@@ -143,12 +143,44 @@
 .fm-editor-condition {
   display: flex;
   align-items: center;
-  gap: var(--size-2-2);
+  gap: var(--size-2-3);
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
-  padding: var(--size-2-2) var(--size-4-1);
+  padding: var(--size-2-3) var(--size-4-2);
   flex-wrap: wrap;
+}
+
+.fm-editor-condition .fm-editor-chip-prop-wrap {
+  flex: 0 1 240px;
+  min-width: 200px;
+}
+
+.fm-editor-condition .fm-editor-chip-value-wrap {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.fm-editor-condition .fm-editor-chip-prop-wrap .fm-combo,
+.fm-editor-condition .fm-editor-chip-value-wrap .fm-combo {
+  width: 100%;
+  min-width: 0;
+}
+
+.fm-editor-chip-op {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  padding: var(--size-2-2) var(--size-2-3);
+  min-height: 32px;
+  min-width: 160px;
+  color: var(--text-normal);
+}
+
+.fm-editor-chip-op:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
 }
 
 .fm-editor-condition-combinator {
@@ -466,9 +498,11 @@
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
-  padding: var(--size-2-1) var(--size-2-3);
-  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-2) var(--size-2-3);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
   color: var(--text-normal);
+  min-height: 28px;
   transition: border-color 120ms ease;
 }
 
@@ -742,8 +776,62 @@
   display: flex;
   flex-direction: column;
   gap: var(--size-4-3);
-  min-width: 520px;
-  max-width: 720px;
+  min-width: 640px;
+  max-width: min(900px, 92vw);
+  width: 720px;
+}
+
+/* Override Obsidian's default Setting layout so text inputs are usable. */
+.fm-editor-modal-content .setting-item {
+  align-items: flex-start;
+  padding: var(--size-4-3) 0;
+}
+
+.fm-editor-modal-content .setting-item-info {
+  margin-right: var(--size-4-3);
+  flex: 0 0 220px;
+  max-width: 240px;
+}
+
+.fm-editor-modal-content .setting-item-name {
+  font-weight: var(--font-semibold);
+}
+
+.fm-editor-modal-content .setting-item-description {
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+}
+
+.fm-editor-modal-content .setting-item-control {
+  flex: 1 1 auto;
+  min-width: 320px;
+  justify-content: flex-end;
+  gap: var(--size-2-2);
+}
+
+/* Native Obsidian text inputs in our modals: full-width, comfortable padding,
+   readable font-size. */
+.fm-editor-modal-content .setting-item-control input[type="text"],
+.fm-editor-modal-content .setting-item-control input[type="search"],
+.fm-editor-modal-content .setting-item-control input:not([type]) {
+  flex: 1 1 auto;
+  min-width: 280px;
+  width: 100%;
+  padding: var(--size-2-3) var(--size-4-2);
+  font-size: var(--font-ui-small);
+  border-radius: var(--radius-s);
+}
+
+.fm-editor-modal-content .setting-item-control select {
+  flex: 1 1 auto;
+  min-width: 240px;
+  padding: var(--size-2-3) var(--size-4-2);
+  font-size: var(--font-ui-small);
+}
+
+.fm-editor-modal-content .setting-item-control .dropdown {
+  flex: 1 1 auto;
+  min-width: 240px;
 }
 
 .fm-editor-modal-target {
@@ -897,21 +985,23 @@
   color: var(--text-normal);
 }
 
-/* multi-source chips inside transform modal */
+/* multi-source chips inside action modals */
 
 .fm-editor-multi-source {
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-2);
+  gap: var(--size-2-3);
   flex: 1;
+  width: 100%;
 }
 
 .fm-editor-multi-source-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--size-2-1);
-  min-height: 28px;
-  padding: var(--size-2-2);
+  align-items: center;
+  gap: var(--size-2-2);
+  min-height: 40px;
+  padding: var(--size-2-2) var(--size-2-3);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: var(--background-secondary);
@@ -923,6 +1013,8 @@
   color: var(--text-accent);
   font-family: var(--font-monospace);
   gap: var(--size-2-1);
+  padding: var(--size-2-1) var(--size-2-3);
+  font-size: var(--font-ui-small);
 }
 
 .fm-editor-multi-source-chips .fm-editor-chip-remove {
@@ -930,7 +1022,7 @@
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 0;
+  padding: 0 var(--size-2-1);
   display: inline-flex;
   align-items: center;
 }
@@ -942,10 +1034,19 @@
 .fm-editor-multi-source-add {
   display: flex;
   gap: var(--size-2-2);
+  align-items: stretch;
 }
 
 .fm-editor-multi-source-add input {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 240px;
+  min-height: 32px;
+  padding: var(--size-2-2) var(--size-4-2);
+  font-size: var(--font-ui-small);
+}
+
+.fm-editor-multi-source-add .fm-editor-btn {
+  flex-shrink: 0;
 }
 
 /* ---------------------------------------------------------------- COMBOBOX */
@@ -953,17 +1054,19 @@
 .fm-combo {
   position: relative;
   display: inline-block;
-  min-width: 140px;
+  min-width: 200px;
 }
 
 .fm-combo-input {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
-  padding: var(--size-2-1) var(--size-2-3);
-  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-2) var(--size-2-3);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
   color: var(--text-normal);
   width: 100%;
+  min-height: 30px;
   transition: border-color 120ms ease;
 }
 
@@ -1064,8 +1167,8 @@
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   box-shadow: var(--shadow-l);
-  width: 340px;
-  max-height: 500px;
+  width: 400px;
+  max-height: 540px;
   display: flex;
   flex-direction: column;
 }
@@ -1080,12 +1183,13 @@
 
 .fm-multiselect-search {
   flex: 1;
-  padding: var(--size-2-2) var(--size-2-3);
+  padding: var(--size-2-3) var(--size-4-2);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: var(--background-primary);
   font-size: var(--font-ui-small);
   color: var(--text-normal);
+  min-height: 32px;
 }
 
 .fm-multiselect-search:focus {
@@ -1227,11 +1331,11 @@
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   box-shadow: var(--shadow-l);
-  padding: var(--size-4-2);
-  min-width: 320px;
+  padding: var(--size-4-3);
+  min-width: 400px;
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-3);
+  gap: var(--size-4-2);
 }
 
 .fm-editor-popover-row {
@@ -1241,8 +1345,9 @@
 }
 
 .fm-editor-popover-row label {
-  width: 80px;
-  font-size: var(--font-ui-smaller);
+  width: 100px;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -1250,17 +1355,24 @@
 .fm-editor-popover-row select,
 .fm-editor-popover-row input {
   flex: 1;
-  padding: var(--size-2-1) var(--size-2-3);
+  padding: var(--size-2-3) var(--size-4-2);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: var(--background-primary);
   color: var(--text-normal);
   font-size: var(--font-ui-small);
+  min-height: 32px;
 }
 
 .fm-editor-popover-input-wrap {
   flex: 1;
   position: relative;
+  min-width: 220px;
+}
+
+.fm-editor-popover-input-wrap .fm-combo,
+.fm-editor-popover-input-wrap .fm-combo-input {
+  width: 100%;
 }
 
 .fm-editor-popover-actions {
