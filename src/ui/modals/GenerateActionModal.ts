@@ -39,15 +39,37 @@ export class GenerateActionModal extends Modal {
     if (enabledProviders.length === 0) {
       contentEl.createDiv({
         cls: "fm-editor-modal-hint",
-        text: "No enabled LLM provider. Open Settings → Frontmatter Editor → LLM providers to add one.",
+        text: this.plugin.settings.providers.length === 0
+          ? "No LLM provider configured yet. Add one to enable the AI generators -- Anthropic, OpenAI, OpenRouter and Custom (OpenAI-compatible incl. Ollama / LM Studio) are supported."
+          : "All configured providers are disabled. Re-enable at least one to run the generators.",
       });
       const footer = contentEl.createDiv({ cls: "fm-editor-modal-footer" });
       const right = footer.createDiv({ cls: "fm-editor-modal-footer-right" });
       const close = right.createEl("button", {
-        text: "Close",
-        cls: "fm-editor-btn mod-cta",
+        text: "Cancel",
+        cls: "fm-editor-btn",
       });
       close.addEventListener("click", () => this.close());
+      const openSettings = right.createEl("button", {
+        cls: "fm-editor-btn mod-cta",
+      });
+      setIcon(openSettings.createSpan(), "settings");
+      openSettings.createSpan({ text: "Open plugin settings" });
+      openSettings.addEventListener("click", () => {
+        const setting = (this.app as unknown as {
+          setting?: {
+            open: () => void;
+            openTabById: (id: string) => void;
+          };
+        }).setting;
+        if (!setting) {
+          new Notice("Settings panel not available.");
+          return;
+        }
+        this.close();
+        setting.open();
+        setting.openTabById(this.plugin.manifest.id);
+      });
       return;
     }
 

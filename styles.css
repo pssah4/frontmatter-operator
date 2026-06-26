@@ -16,7 +16,9 @@
   height: 100%;
   font-size: var(--font-ui-small);
   color: var(--text-normal);
-  background: var(--background-primary);
+  background: var(--background-secondary);
+  padding: var(--size-4-2);
+  gap: var(--size-4-2);
 }
 
 /* ---------------------------------------------------------------- HEADER */
@@ -27,8 +29,11 @@
   justify-content: space-between;
   gap: var(--size-4-3);
   padding: var(--size-4-2) var(--size-4-3);
-  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .fm-editor-header-left {
@@ -62,130 +67,33 @@
   margin: 0 var(--size-4-1);
 }
 
-/* ---------------------------------------------------------------- MAIN ROW + FLOW RAIL */
+/* ---------------------------------------------------------------- SECTION BLOCKS */
 
-.fm-editor-main-row {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
+/* WHEN bar, table, THEN bar each read as a separate surface with small gaps
+   between them so the rule flow is visually chunked top-to-bottom without
+   needing a side rail. */
 
-.fm-editor-rail {
-  width: 84px;
-  flex-shrink: 0;
-  background: var(--background-secondary);
-  border-right: 1px solid var(--background-modifier-border);
-  padding: var(--size-4-4) 0 var(--size-4-4) 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  align-self: stretch;
-}
-
-.fm-editor-main-stack {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-/* Minimal flow rail: a thin vertical line on the left of the view with four
-   labeled dots. Connects WHEN -> FILTER -> MATCHED -> THEN as a path. */
-
-.fm-editor-rail-list {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  justify-content: space-between;
-  align-items: center;
-  position: relative;
-  width: 100%;
-  padding: var(--size-4-2) 0;
-}
-
-/* The single connecting line behind the dots. */
-.fm-editor-rail-list::before {
-  content: "";
-  position: absolute;
-  top: var(--size-4-4);
-  bottom: var(--size-4-4);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 2px;
-  background: var(--background-modifier-border);
-  border-radius: 1px;
-}
-
-.fm-editor-rail-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--size-2-2);
-  cursor: pointer;
-  padding: var(--size-2-2) 0;
-  width: 100%;
-  user-select: none;
-}
-
-.fm-editor-rail-item:hover .fm-editor-rail-text {
-  color: var(--text-normal);
-}
-
-.fm-editor-rail-item.is-disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.fm-editor-rail-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.fm-editor-when-section,
+.fm-editor-table-section,
+.fm-editor-action-bar {
   background: var(--background-primary);
-  border: 2px solid var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.fm-editor-when-section {
   flex-shrink: 0;
-  position: relative;
-  z-index: 1;
-  transition: background-color 140ms ease, border-color 140ms ease,
-    box-shadow 140ms ease;
 }
 
-.fm-editor-rail-item:hover .fm-editor-rail-dot {
-  border-color: var(--text-accent);
+.fm-editor-table-section {
+  flex: 1;
+  min-height: 0;
 }
 
-.fm-editor-rail-item.is-active .fm-editor-rail-dot {
-  background: var(--interactive-accent);
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
-}
-
-.fm-editor-rail-item.is-result .fm-editor-rail-dot {
-  width: 14px;
-  height: 14px;
-  background: var(--interactive-accent);
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--interactive-accent) 28%, transparent);
-}
-
-.fm-editor-rail-text {
-  font-size: 10px;
-  font-weight: var(--font-bold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  white-space: nowrap;
-  text-align: center;
-  transition: color 140ms ease;
-}
-
-.fm-editor-rail-item.is-active .fm-editor-rail-text {
-  color: var(--interactive-accent);
-}
-
-.fm-editor-rail-item.is-result .fm-editor-rail-text {
-  color: var(--interactive-accent);
+.fm-editor-action-bar {
+  flex-shrink: 0;
 }
 
 /* ---------------------------------------------------------------- SECTION LABELS */
@@ -232,9 +140,7 @@
   flex-shrink: 0;
 }
 
-.fm-editor-when-section {
-  border-bottom: 2px solid var(--background-modifier-border);
-}
+/* (border-bottom removed -- block container now provides the separation) */
 
 .fm-editor-rule-summary {
   flex: 1;
@@ -773,9 +679,7 @@
 /* ---------------------------------------------------------------- THEN BAR */
 
 .fm-editor-action-bar {
-  border-top: 2px solid var(--background-modifier-border);
-  padding: var(--size-4-3) var(--size-4-3) var(--size-4-6);
-  background: var(--background-secondary);
+  padding: var(--size-4-3);
   display: flex;
   flex-direction: column;
   gap: var(--size-4-2);

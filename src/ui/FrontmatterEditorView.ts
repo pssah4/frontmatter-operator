@@ -174,95 +174,9 @@ export class FrontmatterEditorView extends ItemView {
     root.addClass("fm-editor-content");
 
     this.renderToolbar(root);
-
-    const mainRow = root.createDiv({ cls: "fm-editor-main-row" });
-    this.renderFlowRail(mainRow);
-    const mainStack = mainRow.createDiv({ cls: "fm-editor-main-stack" });
-
-    this.renderWhenBar(mainStack);
-    this.renderTableSection(mainStack);
-    this.renderActionBar(mainStack);
-  }
-
-  // ============================================================ FLOW RAIL
-
-  private renderFlowRail(parent: HTMLElement): void {
-    const rail = parent.createDiv({ cls: "fm-editor-rail" });
-    rail.setAttribute("role", "navigation");
-    rail.setAttribute("aria-label", "Rule flow");
-
-    const whenCount = this.globalFilters.length;
-    const filterCount =
-      this.activeColumnFilters().length + (this.notePathFilter ? 1 : 0);
-    const matchedCount = this.filteredRows.length;
-    const explicitSelection = this.selectedPaths.size > 0;
-    const targetCount = explicitSelection
-      ? this.selectedPaths.size
-      : matchedCount;
-
-    const steps = [
-      {
-        label: "WHEN",
-        active: whenCount > 0,
-        onClick: () => this.scrollToSelector(".fm-editor-when-section"),
-        title:
-          whenCount === 0
-            ? "WHEN — no global conditions (optional)"
-            : `WHEN — ${whenCount} condition${whenCount === 1 ? "" : "s"}`,
-      },
-      {
-        label: "FILTER",
-        active: filterCount > 0,
-        onClick: () => this.scrollToSelector(".fm-editor-table-section"),
-        title:
-          filterCount === 0
-            ? "FILTER — no column filters (optional)"
-            : `FILTER — ${filterCount} column filter${filterCount === 1 ? "" : "s"}`,
-      },
-      {
-        label: "MATCHED",
-        active: matchedCount > 0,
-        isResult: true,
-        onClick: () => this.scrollToSelector(".fm-editor-table-section"),
-        title: `MATCHED — ${targetCount} note${targetCount === 1 ? "" : "s"}`,
-      },
-      {
-        label: "THEN",
-        active: targetCount > 0,
-        disabled: targetCount === 0,
-        onClick: () => this.scrollToSelector(".fm-editor-action-bar"),
-        title:
-          targetCount === 0
-            ? "THEN — no notes match"
-            : "THEN — pick an action",
-      },
-    ];
-
-    const list = rail.createDiv({ cls: "fm-editor-rail-list" });
-    steps.forEach((s, i) => {
-      const item = list.createDiv({ cls: "fm-editor-rail-item" });
-      if (s.active) item.addClass("is-active");
-      if (s.isResult && s.active) item.addClass("is-result");
-      if (s.disabled) item.addClass("is-disabled");
-      if (i === 0) item.addClass("is-first");
-      if (i === steps.length - 1) item.addClass("is-last");
-
-      item.createSpan({ cls: "fm-editor-rail-dot" });
-      item.createSpan({ cls: "fm-editor-rail-text", text: s.label });
-
-      item.title = s.title;
-      item.setAttribute("role", "button");
-      item.setAttribute("tabindex", s.disabled ? "-1" : "0");
-      if (!s.disabled) {
-        item.addEventListener("click", () => s.onClick());
-        item.addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter" || ev.key === " ") {
-            ev.preventDefault();
-            s.onClick();
-          }
-        });
-      }
-    });
+    this.renderWhenBar(root);
+    this.renderTableSection(root);
+    this.renderActionBar(root);
   }
 
   private scrollToSelector(selector: string): void {
@@ -302,6 +216,9 @@ export class FrontmatterEditorView extends ItemView {
 
     this.appendDivider(right);
 
+    this.makeIconButton(right, "settings", "Plugin settings", () => {
+      this.openPluginSettings();
+    });
     this.makeIconButton(right, "rotate-cw", "Refresh", async () => {
       await this.refreshScan();
       this.render();
@@ -340,6 +257,21 @@ export class FrontmatterEditorView extends ItemView {
       void onClick(btn);
     });
     return btn;
+  }
+
+  private openPluginSettings(): void {
+    const setting = (this.app as unknown as {
+      setting?: {
+        open: () => void;
+        openTabById: (id: string) => void;
+      };
+    }).setting;
+    if (!setting) {
+      new Notice("Settings panel not available.");
+      return;
+    }
+    setting.open();
+    setting.openTabById(this.plugin.manifest.id);
   }
 
   private async undoLastAction(): Promise<void> {
