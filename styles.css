@@ -17,8 +17,8 @@
   font-size: var(--font-ui-small);
   color: var(--text-normal);
   background: var(--background-secondary);
-  padding: var(--size-4-2);
-  gap: var(--size-4-2);
+  padding: var(--size-4-4);
+  gap: var(--size-4-4);
 }
 
 /* ---------------------------------------------------------------- HEADER */
@@ -28,10 +28,13 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--size-4-3);
-  padding: var(--size-4-2) var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-4);
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 2px 6px rgba(0, 0, 0, 0.04);
   flex-wrap: wrap;
   flex-shrink: 0;
 }
@@ -78,9 +81,40 @@
 .fm-editor-action-bar {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-radius: var(--radius-l);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 2px 6px rgba(0, 0, 0, 0.04);
   overflow: hidden;
+  position: relative;
+}
+
+/* Each section gets a colored ribbon on the left so the three are
+   instantly recognizable as separate components: WHEN (accent),
+   table (muted), THEN (success). */
+.fm-editor-when-section::before,
+.fm-editor-table-section::before,
+.fm-editor-action-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: var(--radius-l) 0 0 var(--radius-l);
+}
+
+.fm-editor-when-section::before {
+  background: var(--interactive-accent);
+}
+
+.fm-editor-table-section::before {
+  background: var(--text-faint);
+  opacity: 0.5;
+}
+
+.fm-editor-action-bar::before {
+  background: var(--color-green, var(--interactive-accent));
 }
 
 .fm-editor-when-section {
@@ -109,7 +143,13 @@
   align-items: center;
   gap: var(--size-4-3);
   flex-wrap: wrap;
-  padding: var(--size-4-3) var(--size-4-3) var(--size-2-2);
+  padding: var(--size-4-3) var(--size-4-4) var(--size-4-2);
+  background: var(--background-secondary-alt, var(--background-secondary));
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.fm-editor-section-label {
+  font-size: var(--font-ui-small) !important;
 }
 
 .fm-editor-section-label-block {
@@ -183,11 +223,10 @@
 /* ---------------------------------------------------------------- WHEN BAR */
 
 .fm-editor-filter-bar {
-  padding: 0 var(--size-4-3) var(--size-4-2);
-  border-bottom: 1px solid var(--background-modifier-border);
+  padding: var(--size-4-3) var(--size-4-4) var(--size-4-3);
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-2);
+  gap: var(--size-2-3);
 }
 
 .fm-editor-conditions {
@@ -679,7 +718,7 @@
 /* ---------------------------------------------------------------- THEN BAR */
 
 .fm-editor-action-bar {
-  padding: var(--size-4-3);
+  padding: var(--size-4-3) var(--size-4-4);
   display: flex;
   flex-direction: column;
   gap: var(--size-4-2);
@@ -690,6 +729,9 @@
   align-items: center;
   gap: var(--size-4-3);
   flex-wrap: wrap;
+  padding-bottom: var(--size-2-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: var(--size-2-2);
 }
 
 .fm-editor-action-label-block {
