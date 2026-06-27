@@ -2,72 +2,90 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 import type {
   CompletionRequest,
   CompletionResult,
-  ProviderConfig,
-  ProviderType,
+  CustomModel,
 } from "../../types/llm";
-import { ProviderError } from "../../types/llm";
-import { PROVIDER_DEFAULT_BASE_URLS } from "../../types/llm";
+import {
+  DEFAULT_BASE_URLS,
+  DEFAULT_API_VERSIONS,
+  ProviderError,
+  isTemperatureFixed,
+  recommendedMaxTokens,
+} from "../../types/llm";
 import type { ApiHandler } from "../types";
 
-const DEFAULT_MODELS: Record<string, string> = {
-  openai: "gpt-4o-mini",
-  openrouter: "openai/gpt-4o-mini",
-  custom: "llama3.2",
-};
+export interface OpenAICompatibleOptions {
+  /** Override the bearer token (used by GitHub Copilot / ChatGPT OAuth flows). */
+  overrideToken?: string;
+  /** Extra headers to inject (used by OpenRouter referer, Copilot user agent, Kilo org id). */
+  extraHeaders?: Record<string, string>;
+  /** Override the chat-completions URL (used by Azure deployments). */
+  urlOverride?: string;
+}
 
 /**
- * Shared OpenAI-compatible POST /chat/completions handler. Used for OpenAI,
- * OpenRouter, and any custom endpoint that speaks the OpenAI chat completions
- * shape (Ollama, LM Studio, vLLM, llama.cpp server, etc.).
+ * Shared POST /chat/completions handler covering OpenAI, OpenRouter, Custom,
+ * Ollama, LM Studio, Azure, GitHub Copilot, Kilo Gateway, and ChatGPT OAuth.
  */
 export class OpenAICompatibleProvider implements ApiHandler {
   readonly providerType: string;
 
-  constructor(private config: ProviderConfig) {
-    this.providerType = config.type;
+  constructor(
+    private model: CustomModel,
+    private opts: OpenAICompatibleOptions = {},
+  ) {
+    this.providerType = model.provider;
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
-    const type = this.config.type as ProviderType;
-    if (type === "openai" && !this.config.apiKey) {
-      throw new ProviderError("OpenAI provider has no API key.", type);
-    }
-    if (type === "openrouter" && !this.config.apiKey) {
-      throw new ProviderError("OpenRouter provider has no API key.", type);
-    }
-
-    const model =
-      req.model ??
-      this.config.defaultModel ??
-      DEFAULT_MODELS[type] ??
-      "gpt-4o-mini";
     const baseUrl = (
-      this.config.baseUrl ?? PROVIDER_DEFAULT_BASE_URLS[type]
+      this.model.baseUrl ?? DEFAULT_BASE_URLS[this.model.provider] ?? ""
     ).replace(/\/+$/, "");
-    const url = `${baseUrl}/chat/completions`;
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.config.apiKey) {
-      headers["Authorization"] = `Bearer ${this.config.apiKey}`;
+    if (!baseUrl && !this.opts.urlOverride) {
+      throw new ProviderError(
+        `${this.providerType} model has no base URL.`,
+        this.model.provider,
+      );
     }
-    if (type === "openrouter") {
-      headers["HTTP-Referer"] = "https://github.com/pssah4/frontmatter-editor-dev";
-      headers["X-Title"] = "Frontmatter Editor";
-    }
+    const url = this.opts.urlOverride ?? this.buildUrl(baseUrl);
 
     const messages = [
       { role: "system", content: req.systemPrompt },
       ...req.messages.map((m) => ({ role: m.role, content: m.content })),
     ];
 
-    const body = {
-      model,
+    const body: Record<string, unknown> = {
+      model: this.model.name,
       messages,
-      temperature: req.temperature ?? 0,
-      max_tokens: req.maxTokens,
     };
+    const maxTokens =
+      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.name);
+    if (maxTokens) body.max_tokens = maxTokens;
+
+    if (!isTemperatureFixed(this.model)) {
+      const temp =
+        req.temperature ??
+        this.model.temperature ??
+        0;
+      body.temperature = temp;
+    }
+
+    if (this.model.reasoningEffort) {
+      body.reasoning = { effort: this.model.reasoningEffort };
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(this.opts.extraHeaders ?? {}),
+    };
+    const token = this.opts.overrideToken ?? this.model.apiKey;
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    if (this.model.provider === "openrouter") {
+      headers["HTTP-Referer"] =
+        headers["HTTP-Referer"] ??
+        "https://github.com/pssah4/frontmatter-editor-dev";
+      headers["X-Title"] = headers["X-Title"] ?? "Frontmatter Editor";
+    }
 
     const request: RequestUrlParam = {
       url,
@@ -81,7 +99,7 @@ export class OpenAICompatibleProvider implements ApiHandler {
     if (response.status < 200 || response.status >= 300) {
       throw new ProviderError(
         `${this.providerType} ${response.status}: ${shortError(response.json ?? response.text)}`,
-        type,
+        this.model.provider,
         response.status,
       );
     }
@@ -94,7 +112,6 @@ export class OpenAICompatibleProvider implements ApiHandler {
       usage?: { prompt_tokens?: number; completion_tokens?: number };
       model?: string;
     };
-
     const text = json.choices?.[0]?.message?.content ?? "";
     return {
       text,
@@ -102,14 +119,24 @@ export class OpenAICompatibleProvider implements ApiHandler {
         inputTokens: json.usage?.prompt_tokens,
         outputTokens: json.usage?.completion_tokens,
       },
-      model: json.model ?? model,
+      model: json.model ?? this.model.name,
     };
+  }
+
+  private buildUrl(baseUrl: string): string {
+    if (this.model.provider === "azure") {
+      const apiVersion =
+        this.model.apiVersion ?? DEFAULT_API_VERSIONS.azure ?? "2024-10-21";
+      const deployment = this.model.name;
+      return `${baseUrl}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+    }
+    return `${baseUrl}/chat/completions`;
   }
 
   async ping(): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
     try {
       const r = await this.complete({
-        systemPrompt: "You reply with the single word 'pong'.",
+        systemPrompt: "Reply with the single word 'pong'.",
         messages: [{ role: "user", content: "ping" }],
         maxTokens: 16,
       });

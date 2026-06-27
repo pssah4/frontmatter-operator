@@ -20,6 +20,10 @@ import {
 } from "./types/settings";
 import { FrontmatterEditorSettingsTab } from "./ui/settings/SettingsTab";
 import { DEFAULT_PRESETS } from "./types/generators";
+import { SafeStorageService } from "./auth/SafeStorageService";
+import { GitHubCopilotAuthService } from "./auth/GitHubCopilotAuthService";
+import { ChatGptOAuthService } from "./auth/ChatGptOAuthService";
+import { KiloAuthService } from "./auth/KiloAuthService";
 
 export default class FrontmatterEditorPlugin extends Plugin {
   scanner!: FrontmatterScanner;
@@ -28,6 +32,10 @@ export default class FrontmatterEditorPlugin extends Plugin {
   api!: FrontmatterEditorAPI;
   generator!: GeneratorService;
   declare settings: FrontmatterEditorSettings;
+  safeStorage!: SafeStorageService;
+  copilotAuth!: GitHubCopilotAuthService;
+  chatgptAuth!: ChatGptOAuthService;
+  kiloAuth!: KiloAuthService;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -41,7 +49,13 @@ export default class FrontmatterEditorPlugin extends Plugin {
       this.bulk,
       this.snapshots,
     );
-    this.generator = new GeneratorService(this.app);
+
+    this.safeStorage = new SafeStorageService();
+    this.copilotAuth = new GitHubCopilotAuthService(this);
+    this.chatgptAuth = new ChatGptOAuthService(this);
+    this.kiloAuth = new KiloAuthService(this);
+
+    this.generator = new GeneratorService(this.app, this);
 
     this.addSettingTab(new FrontmatterEditorSettingsTab(this.app, this));
 
@@ -149,7 +163,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...(stored ?? {}),
-      providers: stored?.providers ?? [],
+      models: stored?.models ?? [],
       presets: this.mergePresets(stored?.presets),
     };
   }

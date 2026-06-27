@@ -1,20 +1,38 @@
-import type { ProviderConfig } from "./llm";
+import type { CustomModel } from "./llm";
 import type { GeneratorLanguage, GeneratorPreset } from "./generators";
 import { DEFAULT_PRESETS } from "./generators";
 
 export interface FrontmatterEditorSettings {
-  providers: ProviderConfig[];
-  /** id of the provider used by default. */
-  defaultProviderId: string | null;
+  /** All configured models -- replaces the old providers[] bucket. */
+  models: CustomModel[];
+  /** Id of the model used by default in the generator modal. */
+  defaultModelId: string | null;
   /** Language for the built-in preset prompts. */
   generatorLanguage: GeneratorLanguage;
-  /** Custom prompt overrides per preset id (id matches DEFAULT_PRESETS[].id). */
+  /** Built-in + user-added presets. Custom prompts override the defaults. */
   presets: GeneratorPreset[];
+
+  // --- OAuth-managed credentials. Stored encrypted via SafeStorage when available.
+  githubCopilotAccessToken?: string;
+  githubCopilotToken?: string;
+  githubCopilotTokenExpiresAt?: number;
+  githubCopilotDeviceCode?: string;
+
+  chatgptOAuthAccessToken?: string;
+  chatgptOAuthRefreshToken?: string;
+  chatgptOAuthIdToken?: string;
+  chatgptOAuthAccountId?: string;
+  chatgptOAuthEmail?: string;
+  chatgptOAuthExpiresAt?: number;
+
+  kiloToken?: string;
+  kiloAuthMode?: "device-auth" | "manual-token" | "";
+  kiloOrganizationId?: string;
 }
 
 export const DEFAULT_SETTINGS: FrontmatterEditorSettings = {
-  providers: [],
-  defaultProviderId: null,
+  models: [],
+  defaultModelId: null,
   generatorLanguage: "en",
   presets: DEFAULT_PRESETS,
 };

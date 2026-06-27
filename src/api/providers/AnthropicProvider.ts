@@ -2,52 +2,70 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 import type {
   CompletionRequest,
   CompletionResult,
-  ProviderConfig,
+  CustomModel,
 } from "../../types/llm";
-import { ProviderError } from "../../types/llm";
-import { PROVIDER_DEFAULT_BASE_URLS } from "../../types/llm";
+import {
+  DEFAULT_BASE_URLS,
+  ProviderError,
+  recommendedMaxTokens,
+} from "../../types/llm";
 import type { ApiHandler } from "../types";
 
 const ANTHROPIC_VERSION = "2023-06-01";
-const DEFAULT_MODEL = "claude-haiku-4-5";
 
 export class AnthropicProvider implements ApiHandler {
   readonly providerType = "anthropic";
 
-  constructor(private config: ProviderConfig) {}
+  constructor(private model: CustomModel) {}
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
-    if (!this.config.apiKey) {
+    if (!this.model.apiKey && !this.model.useGateway) {
       throw new ProviderError(
-        "Anthropic provider has no API key configured.",
+        "Anthropic model has no API key configured.",
         "anthropic",
       );
     }
-    const model = req.model ?? this.config.defaultModel ?? DEFAULT_MODEL;
-    const baseUrl =
-      this.config.baseUrl?.replace(/\/+$/, "") ??
-      PROVIDER_DEFAULT_BASE_URLS.anthropic;
+    const baseUrl = (
+      this.model.baseUrl ?? DEFAULT_BASE_URLS.anthropic!
+    ).replace(/\/+$/, "");
     const url = `${baseUrl}/v1/messages`;
 
-    const body = {
-      model,
-      max_tokens: req.maxTokens ?? 1024,
+    const maxTokens =
+      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.name);
+
+    const body: Record<string, unknown> = {
+      model: this.model.name,
+      max_tokens: maxTokens,
       system: req.systemPrompt,
-      messages: req.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      temperature: req.temperature ?? 0,
+      messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
     };
+    if (req.temperature !== undefined) {
+      body.temperature = req.temperature;
+    } else if (this.model.temperature !== undefined) {
+      body.temperature = this.model.temperature;
+    } else {
+      body.temperature = 0;
+    }
+    if (this.model.thinkingEnabled) {
+      body.thinking = {
+        type: "enabled",
+        budget_tokens: this.model.thinkingBudgetTokens ?? 10_000,
+      };
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "anthropic-version": ANTHROPIC_VERSION,
+    };
+    if (this.model.useGateway && this.model.gatewayHeaderName) {
+      headers[this.model.gatewayHeaderName] = this.model.gatewayHeaderValue ?? "";
+    }
+    if (this.model.apiKey) headers["x-api-key"] = this.model.apiKey;
 
     const request: RequestUrlParam = {
       url,
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.config.apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-      },
+      headers,
       body: JSON.stringify(body),
       throw: false,
     };
@@ -66,26 +84,24 @@ export class AnthropicProvider implements ApiHandler {
       usage?: { input_tokens?: number; output_tokens?: number };
       model?: string;
     };
-
     const text = (json.content ?? [])
       .filter((b) => b.type === "text")
       .map((b) => b.text ?? "")
       .join("");
-
     return {
       text,
       usage: {
         inputTokens: json.usage?.input_tokens,
         outputTokens: json.usage?.output_tokens,
       },
-      model: json.model ?? model,
+      model: json.model ?? this.model.name,
     };
   }
 
   async ping(): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
     try {
       const r = await this.complete({
-        systemPrompt: "You reply with the single word 'pong'.",
+        systemPrompt: "Reply with the single word 'pong'.",
         messages: [{ role: "user", content: "ping" }],
         maxTokens: 16,
       });

@@ -1342,12 +1342,9 @@ export class FrontmatterEditorView extends ItemView {
   }
 
   private openGenerateModal(): void {
-    const targets = this.getTargetRows();
-    if (targets.length === 0) {
-      new Notice("No notes targeted — adjust the rule first.");
-      return;
-    }
-    new GenerateActionModal(this.app, this.plugin, targets, () => {
+    const matched = this.filteredRows;
+    const ticked = matched.filter((r) => this.selectedPaths.has(r.path));
+    new GenerateActionModal(this.app, this.plugin, matched, ticked, () => {
       void this.refreshScan().then(() => this.render());
     }).open();
   }

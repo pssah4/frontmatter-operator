@@ -4,8 +4,9 @@ import type {
   GeneratorLanguage,
   GeneratorPreset,
 } from "../../types/generators";
-import type { ProviderConfig } from "../../types/llm";
+import type { CustomModel } from "../../types/llm";
 import { buildApiHandler } from "../../api/ProviderRegistry";
+import type FrontmatterEditorPlugin from "../../main";
 import { parseResponse } from "./parsers";
 
 export interface GeneratorRunResult {
@@ -17,7 +18,7 @@ export interface GeneratorRunResult {
 
 export interface GeneratorRunOptions {
   preset: GeneratorPreset;
-  provider: ProviderConfig;
+  model: CustomModel;
   language: GeneratorLanguage;
   /** Notes to process. */
   targets: TFile[];
@@ -33,7 +34,10 @@ export interface GeneratorRunOptions {
 const MAX_BODY_CHARS = 12_000;
 
 export class GeneratorService {
-  constructor(private app: App) {}
+  constructor(
+    private app: App,
+    private plugin: FrontmatterEditorPlugin,
+  ) {}
 
   /**
    * Runs the preset against every target note. For each note:
@@ -53,7 +57,7 @@ export class GeneratorService {
       errorCount: 0,
       errors: [],
     };
-    const handler = buildApiHandler(opts.provider);
+    const handler = await buildApiHandler(opts.model, this.plugin);
     const prompts = opts.preset.prompts[opts.language];
     if (!prompts) {
       throw new Error(
@@ -85,7 +89,6 @@ export class GeneratorService {
         const completion = await handler.complete({
           systemPrompt: prompts.systemPrompt,
           messages: [{ role: "user", content: userPrompt }],
-          model: opts.provider.defaultModel,
         });
 
         const parsed = parseResponse(opts.preset.parser, completion.text);

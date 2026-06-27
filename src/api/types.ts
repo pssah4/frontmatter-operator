@@ -1,7 +1,6 @@
 import type {
   CompletionRequest,
   CompletionResult,
-  ProviderConfig,
 } from "../types/llm";
 
 /**
@@ -16,4 +15,3 @@ export interface ApiHandler {
   ping(): Promise<{ ok: true; model: string } | { ok: false; error: string }>;
 }
 
-export type ApiHandlerFactory = (config: ProviderConfig) => ApiHandler;
