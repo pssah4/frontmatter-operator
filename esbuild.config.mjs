@@ -29,6 +29,10 @@ const context = await esbuild.context({
     "@lezer/highlight",
     "@lezer/lr",
     ...builtins,
+    // Node builtins referenced by @smithy/node-http-handler under "node:" prefix.
+    // Obsidian runs in Electron and has Node access in the renderer; mark as
+    // external so esbuild does not try to polyfill or resolve them.
+    ...builtins.map((m) => `node:${m}`),
   ],
   format: "cjs",
   target: "es2022",
@@ -37,6 +41,7 @@ const context = await esbuild.context({
   treeShaking: true,
   outfile: "main.js",
   minify: prod,
+  platform: "browser",
 });
 
 if (prod) {

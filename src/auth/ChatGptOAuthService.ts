@@ -2,6 +2,11 @@ import { Notice, requestUrl } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
 import { startLoopbackServer } from "./PkceLoopbackServer";
 import { openExternal } from "./openExternal";
+import {
+  decodeJwtClaims,
+  findClaimInNestedObjects,
+  readStringClaim,
+} from "./jwt-decode";
 
 /**
  * ChatGPT (Codex CLI) OAuth via PKCE.
@@ -102,6 +107,20 @@ export class ChatGptOAuthService {
     const exp = this.plugin.settings.chatgptOAuthExpiresAt ?? 0;
     const now = Date.now();
     if (this.plugin.settings.chatgptOAuthAccessToken && exp > now + 60_000) {
+      // VO recovery path: a sign-in captured before the nested-claim fix
+      // leaves accountId empty, which then drops the chatgpt-account-id
+      // header and 403s every codex request. Re-derive from the existing
+      // tokens instead of forcing a re-login.
+      if (!this.plugin.settings.chatgptOAuthAccountId) {
+        const recovered = this.deriveAccountId(
+          this.plugin.settings.chatgptOAuthIdToken,
+          this.plugin.settings.chatgptOAuthAccessToken,
+        );
+        if (recovered) {
+          this.plugin.settings.chatgptOAuthAccountId = recovered;
+          await this.plugin.saveSettings();
+        }
+      }
       return this.plugin.settings.chatgptOAuthAccessToken;
     }
     if (!this.plugin.settings.chatgptOAuthRefreshToken) return undefined;
@@ -169,12 +188,21 @@ export class ChatGptOAuthService {
     }
     if (tokens.id_token) {
       this.plugin.settings.chatgptOAuthIdToken = tokens.id_token;
-      const claims = parseIdToken(tokens.id_token);
-      if (claims) {
-        this.plugin.settings.chatgptOAuthEmail = claims.email;
-        this.plugin.settings.chatgptOAuthAccountId =
-          claims["https://api.openai.com/auth"]?.chatgpt_account_id;
-      }
+    }
+    // VO learning: the chatgpt-account-id and email claims may live on the
+    // id_token, the access_token, or only inside the nested
+    // https://api.openai.com/auth object. Try both tokens, both flat and
+    // nested. Without account-id every codex/responses request 403s.
+    const accountId = this.deriveAccountId(
+      tokens.id_token,
+      tokens.access_token,
+    );
+    if (accountId) {
+      this.plugin.settings.chatgptOAuthAccountId = accountId;
+    }
+    const email = this.deriveEmail(tokens.id_token, tokens.access_token);
+    if (email) {
+      this.plugin.settings.chatgptOAuthEmail = email;
     }
     if (tokens.expires_in) {
       this.plugin.settings.chatgptOAuthExpiresAt =
@@ -182,27 +210,45 @@ export class ChatGptOAuthService {
     }
     await this.plugin.saveSettings();
   }
-}
 
-interface IdTokenClaims {
-  email?: string;
-  "https://api.openai.com/auth"?: { chatgpt_account_id?: string };
-}
-
-function parseIdToken(jwt: string): IdTokenClaims | null {
-  try {
-    const parts = jwt.split(".");
-    if (parts.length < 2) return null;
-    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = atob(padBase64(payload));
-    return JSON.parse(json) as IdTokenClaims;
-  } catch {
-    return null;
+  private deriveAccountId(
+    idToken: string | undefined,
+    accessToken: string | undefined,
+  ): string {
+    for (const jwt of [idToken, accessToken]) {
+      if (!jwt) continue;
+      const claims = decodeJwtClaims(jwt);
+      if (!claims) continue;
+      const fromKnown = readStringClaim(
+        claims,
+        "https://api.openai.com/auth.chatgpt_account_id",
+        "chatgpt_account_id",
+        "account_id",
+      );
+      if (fromKnown) return fromKnown;
+      const fromDeep = findClaimInNestedObjects(
+        claims,
+        "chatgpt_account_id",
+        "account_id",
+      );
+      if (fromDeep) return fromDeep;
+    }
+    return "";
   }
-}
 
-function padBase64(s: string): string {
-  return s + "=".repeat((4 - (s.length % 4)) % 4);
+  private deriveEmail(
+    idToken: string | undefined,
+    accessToken: string | undefined,
+  ): string {
+    for (const jwt of [idToken, accessToken]) {
+      if (!jwt) continue;
+      const claims = decodeJwtClaims(jwt);
+      if (!claims) continue;
+      const email = readStringClaim(claims, "email");
+      if (email) return email;
+    }
+    return "";
+  }
 }
 
 function randomBytes(n: number): Uint8Array {
