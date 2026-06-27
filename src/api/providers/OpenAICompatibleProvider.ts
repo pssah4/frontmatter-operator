@@ -2,7 +2,9 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 import type {
   CompletionRequest,
   CompletionResult,
-  CustomModel,
+  ProviderConfig,
+  ProviderType,
+  RunModelOptions,
 } from "../../types/llm";
 import {
   DEFAULT_BASE_URLS,
@@ -16,34 +18,40 @@ import type { ApiHandler } from "../types";
 export interface OpenAICompatibleOptions {
   /** Override the bearer token (used by GitHub Copilot / ChatGPT OAuth flows). */
   overrideToken?: string;
-  /** Extra headers to inject (used by OpenRouter referer, Copilot user agent, Kilo org id). */
+  /** Extra headers (e.g. Copilot Editor-Version, Kilo organization id). */
   extraHeaders?: Record<string, string>;
   /** Override the chat-completions URL (used by Azure deployments). */
   urlOverride?: string;
+  /** Provider-baseUrl override (Copilot / Kilo / ChatGPT pin custom hosts). */
+  baseUrlOverride?: string;
 }
 
 /**
- * Shared POST /chat/completions handler covering OpenAI, OpenRouter, Custom,
- * Ollama, LM Studio, Azure, GitHub Copilot, Kilo Gateway, and ChatGPT OAuth.
+ * Shared POST /chat/completions handler covering openai, openrouter, custom,
+ * ollama, lmstudio, azure, github-copilot, kilo-gateway, chatgpt-oauth.
  */
 export class OpenAICompatibleProvider implements ApiHandler {
   readonly providerType: string;
 
   constructor(
-    private model: CustomModel,
+    private provider: ProviderConfig,
+    private model: RunModelOptions,
     private opts: OpenAICompatibleOptions = {},
   ) {
-    this.providerType = model.provider;
+    this.providerType = provider.type;
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     const baseUrl = (
-      this.model.baseUrl ?? DEFAULT_BASE_URLS[this.model.provider] ?? ""
+      this.opts.baseUrlOverride ??
+      this.provider.baseUrl ??
+      DEFAULT_BASE_URLS[this.provider.type] ??
+      ""
     ).replace(/\/+$/, "");
     if (!baseUrl && !this.opts.urlOverride) {
       throw new ProviderError(
-        `${this.providerType} model has no base URL.`,
-        this.model.provider,
+        `${this.providerType} provider has no base URL.`,
+        this.provider.type,
       );
     }
     const url = this.opts.urlOverride ?? this.buildUrl(baseUrl);
@@ -54,18 +62,15 @@ export class OpenAICompatibleProvider implements ApiHandler {
     ];
 
     const body: Record<string, unknown> = {
-      model: this.model.name,
+      model: this.model.modelId,
       messages,
     };
     const maxTokens =
-      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.name);
+      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.modelId);
     if (maxTokens) body.max_tokens = maxTokens;
 
-    if (!isTemperatureFixed(this.model)) {
-      const temp =
-        req.temperature ??
-        this.model.temperature ??
-        0;
+    if (!isTemperatureFixed(this.provider.type, this.model.modelId)) {
+      const temp = req.temperature ?? this.model.temperature ?? 0;
       body.temperature = temp;
     }
 
@@ -77,10 +82,10 @@ export class OpenAICompatibleProvider implements ApiHandler {
       "Content-Type": "application/json",
       ...(this.opts.extraHeaders ?? {}),
     };
-    const token = this.opts.overrideToken ?? this.model.apiKey;
+    const token = this.opts.overrideToken ?? this.provider.apiKey;
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    if (this.model.provider === "openrouter") {
+    if (this.provider.type === "openrouter") {
       headers["HTTP-Referer"] =
         headers["HTTP-Referer"] ??
         "https://github.com/pssah4/frontmatter-editor-dev";
@@ -99,7 +104,7 @@ export class OpenAICompatibleProvider implements ApiHandler {
     if (response.status < 200 || response.status >= 300) {
       throw new ProviderError(
         `${this.providerType} ${response.status}: ${shortError(response.json ?? response.text)}`,
-        this.model.provider,
+        this.provider.type,
         response.status,
       );
     }
@@ -119,15 +124,15 @@ export class OpenAICompatibleProvider implements ApiHandler {
         inputTokens: json.usage?.prompt_tokens,
         outputTokens: json.usage?.completion_tokens,
       },
-      model: json.model ?? this.model.name,
+      model: json.model ?? this.model.modelId,
     };
   }
 
   private buildUrl(baseUrl: string): string {
-    if (this.model.provider === "azure") {
+    if (this.provider.type === "azure") {
       const apiVersion =
-        this.model.apiVersion ?? DEFAULT_API_VERSIONS.azure ?? "2024-10-21";
-      const deployment = this.model.name;
+        this.provider.apiVersion ?? DEFAULT_API_VERSIONS.azure ?? "2024-10-21";
+      const deployment = this.model.modelId;
       return `${baseUrl}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
     }
     return `${baseUrl}/chat/completions`;

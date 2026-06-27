@@ -1,51 +1,55 @@
 import { App, Modal, Notice, Setting, TFile, setIcon } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import type { NoteRow } from "../../types";
-import type { CustomModel } from "../../types/llm";
 import type {
   CustomPromptTemplate,
   GeneratorParserId,
   GeneratorPreset,
 } from "../../types/generators";
 import { emptyCustomPrompt } from "../../types/generators";
+import {
+  MODEL_SUGGESTIONS,
+  PROVIDER_LABELS,
+  type ProviderConfig,
+  type RunModelOptions,
+  getMaxTemperature,
+  isTemperatureFixed,
+  recommendedMaxTokens,
+  supportsThinking,
+} from "../../types/llm";
 
 type NoteScope = "matched" | "selected" | "active-note";
 
-/**
- * Mini-chat / picker for ad-hoc generation against a single column
- * (frontmatter property). Lets the user pick:
- *   - which prompt to use (a built-in preset, a saved custom prompt, or a
- *     live edit)
- *   - which model to use
- *   - which notes to apply it to
- * and optionally save the live-edited prompt as a new custom prompt for
- * the same property.
- */
 export interface GenerateModalOptions {
-  /** The property the action writes into. Filters the prompt picker. */
   targetProperty: string;
   matchedRows: NoteRow[];
   tickedRows: NoteRow[];
-  /** Active note when invoked outside the rule context. */
   activeFile?: TFile | null;
-  /** Default to "active-note" when invoked from a column header on the active note. */
   initialScope?: NoteScope;
 }
 
+/**
+ * AI chat / generator modal. Picks provider + model + decode parameters per
+ * run, plus the prompt (built-in / custom / live edit) and the notes scope.
+ *
+ * Everything that's per-run lives here. Provider _accounts_ (auth) live in
+ * settings.providers[]; the AI chat picks one of them and a concrete model
+ * from its discovery cache.
+ */
 export class GenerateActionModal extends Modal {
   private opts: GenerateModalOptions;
   private selectedPromptId: string;
   private liveSystemPrompt: string;
   private liveUserPrompt: string;
   private liveParser: GeneratorParserId = "single_line_text";
-  private selectedModelId: string | null = null;
+  private selectedProviderId: string | null = null;
+  private selectedModelId = "";
+  private decode: RunModelOptions = { modelId: "" };
   private noteScope: NoteScope;
   private skipIfPropertyExists = false;
   private statusEl: HTMLElement | null = null;
   private runBtn: HTMLButtonElement | null = null;
-  private systemTa: HTMLTextAreaElement | null = null;
-  private userTa: HTMLTextAreaElement | null = null;
-  private parserSelect: HTMLSelectElement | null = null;
+  private showAdvanced = false;
   private onDone: () => void;
 
   constructor(
@@ -58,19 +62,11 @@ export class GenerateActionModal extends Modal {
     this.opts = opts;
     this.onDone = onDone;
 
-    // Pick a sensible initial scope.
-    if (opts.initialScope) {
-      this.noteScope = opts.initialScope;
-    } else if (opts.tickedRows.length > 0) {
-      this.noteScope = "selected";
-    } else if (opts.matchedRows.length > 0) {
-      this.noteScope = "matched";
-    } else {
-      this.noteScope = "active-note";
-    }
+    if (opts.initialScope) this.noteScope = opts.initialScope;
+    else if (opts.tickedRows.length > 0) this.noteScope = "selected";
+    else if (opts.matchedRows.length > 0) this.noteScope = "matched";
+    else this.noteScope = "active-note";
 
-    // Pick a sensible initial prompt: matching preset for the property,
-    // first matching custom prompt, or live.
     const builtIn = plugin.settings.presets.find(
       (p) => p.targetProperty === opts.targetProperty,
     );
@@ -94,12 +90,39 @@ export class GenerateActionModal extends Modal {
       this.liveUserPrompt = defaultUserPrompt(opts.targetProperty);
     }
 
-    const enabled = plugin.settings.models.filter((m) => m.enabled);
-    this.selectedModelId =
-      plugin.settings.defaultModelId &&
-      enabled.some((m) => m.id === plugin.settings.defaultModelId)
-        ? plugin.settings.defaultModelId
-        : (enabled[0]?.id ?? null);
+    // Pick default provider + model.
+    const enabledProviders = plugin.settings.providers.filter((p) => p.enabled);
+    this.selectedProviderId =
+      plugin.settings.defaultProviderId &&
+      enabledProviders.some((p) => p.id === plugin.settings.defaultProviderId)
+        ? plugin.settings.defaultProviderId
+        : (enabledProviders[0]?.id ?? null);
+    this.initModelForProvider();
+  }
+
+  private getSelectedProvider(): ProviderConfig | null {
+    return (
+      this.plugin.settings.providers.find((p) => p.id === this.selectedProviderId) ??
+      null
+    );
+  }
+
+  /** When the selected provider changes, pick a model from the cached list
+   *  or fall back to the last used / static suggestion / blank. */
+  private initModelForProvider(): void {
+    const provider = this.getSelectedProvider();
+    if (!provider) {
+      this.selectedModelId = "";
+      return;
+    }
+    const last = this.plugin.settings.lastUsedModelByProvider[provider.id];
+    const cached = provider.discoveredModels ?? [];
+    const candidates = cached.length > 0
+      ? cached.map((m) => m.id)
+      : (MODEL_SUGGESTIONS[provider.type] ?? []).map((s) => s.id);
+    const fallback = last ?? candidates[0] ?? "";
+    this.selectedModelId = fallback;
+    this.decode = { modelId: fallback };
   }
 
   onOpen(): void {
@@ -108,29 +131,24 @@ export class GenerateActionModal extends Modal {
     contentEl.addClass("fm-editor-modal-content");
     titleEl.setText(`Generate with AI -> ${this.opts.targetProperty}`);
 
-    const enabled = this.plugin.settings.models.filter((m) => m.enabled);
-    if (enabled.length === 0) {
+    const enabledProviders = this.plugin.settings.providers.filter((p) => p.enabled);
+    if (enabledProviders.length === 0) {
       this.renderEmptyState(contentEl);
       return;
     }
 
     const targets = this.computeTargets();
     const banner = contentEl.createDiv({ cls: "fm-editor-modal-target" });
-    banner.createSpan({
-      cls: "fm-editor-modal-target-label",
-      text: "Target",
-    });
+    banner.createSpan({ cls: "fm-editor-modal-target-label", text: "Target" });
     banner.createSpan({
       cls: "fm-editor-modal-target-count",
       text: `${targets.length} ${targets.length === 1 ? "note" : "notes"} -> \`${this.opts.targetProperty}\``,
     });
 
-    // Prompt picker
+    // Prompt
     new Setting(contentEl)
       .setName("Prompt")
-      .setDesc(
-        "Pick a built-in preset, a saved custom prompt, or edit the prompt live.",
-      )
+      .setDesc("Pick a built-in preset, a saved custom prompt, or live-edit below.")
       .addDropdown((d) => {
         const builtIns = this.plugin.settings.presets.filter(
           (p) => p.targetProperty === this.opts.targetProperty,
@@ -138,14 +156,8 @@ export class GenerateActionModal extends Modal {
         const customs = this.plugin.settings.customPrompts.filter(
           (p) => p.targetProperty === this.opts.targetProperty,
         );
-        if (builtIns.length > 0) {
-          for (const p of builtIns) {
-            d.addOption(`built:${p.id}`, `Default: ${p.displayName}`);
-          }
-        }
-        for (const p of customs) {
-          d.addOption(`custom:${p.id}`, `Custom: ${p.name}`);
-        }
+        for (const p of builtIns) d.addOption(`built:${p.id}`, `Default: ${p.displayName}`);
+        for (const p of customs) d.addOption(`custom:${p.id}`, `Custom: ${p.name}`);
         d.addOption("live", "Live edit (not saved)");
         d.setValue(this.selectedPromptId);
         d.onChange((v) => {
@@ -155,63 +167,50 @@ export class GenerateActionModal extends Modal {
         });
       });
 
-    // Live system + user prompts (always editable)
     const sysSetting = new Setting(contentEl)
       .setName("System prompt")
       .setDesc("Guardrail. Tells the model the expected output format.");
     sysSetting.controlEl.style.display = "block";
     sysSetting.controlEl.style.width = "100%";
-    this.systemTa = sysSetting.controlEl.createEl("textarea", {
+    const sysTa = sysSetting.controlEl.createEl("textarea", {
       cls: "fm-editor-generator-textarea",
       text: this.liveSystemPrompt,
     });
-    this.systemTa.rows = 5;
-    this.systemTa.addEventListener("input", () => {
-      this.liveSystemPrompt = this.systemTa!.value;
+    sysTa.rows = 5;
+    sysTa.addEventListener("input", () => {
+      this.liveSystemPrompt = sysTa.value;
     });
 
     const userSetting = new Setting(contentEl)
       .setName("User prompt")
-      .setDesc(
-        "Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}.",
-      );
+      .setDesc("Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}.");
     userSetting.controlEl.style.display = "block";
     userSetting.controlEl.style.width = "100%";
-    this.userTa = userSetting.controlEl.createEl("textarea", {
+    const userTa = userSetting.controlEl.createEl("textarea", {
       cls: "fm-editor-generator-textarea",
       text: this.liveUserPrompt,
     });
-    this.userTa.rows = 9;
-    this.userTa.addEventListener("input", () => {
-      this.liveUserPrompt = this.userTa!.value;
+    userTa.rows = 9;
+    userTa.addEventListener("input", () => {
+      this.liveUserPrompt = userTa.value;
     });
 
-    // Parser
     new Setting(contentEl)
       .setName("Output format")
-      .setDesc(
-        "How the plugin parses the LLM response. Pick the format that matches the system prompt's output instruction.",
-      )
+      .setDesc("Deterministic parser used on the response.")
       .addDropdown((d) => {
-        d.addOption("single_line_text", "Single-line text (description-style)");
-        d.addOption("list_string", "List of strings (tags / keywords)");
-        d.addOption(
-          "moc_topics_concepts",
-          "MoC: topics + concepts (two-key YAML)",
-        );
+        d.addOption("single_line_text", "Single-line text");
+        d.addOption("list_string", "List of strings");
+        d.addOption("moc_topics_concepts", "MoC: topics + concepts");
         d.setValue(this.liveParser);
         d.onChange((v) => {
           this.liveParser = v as GeneratorParserId;
         });
-        this.parserSelect = d.selectEl;
       });
 
-    // Save as custom
     new Setting(contentEl)
       .setName("Save as custom prompt")
-      .setDesc(
-        `Save the current System + User + Output format as a reusable custom prompt for \`${this.opts.targetProperty}\`.`,
-      )
+      .setDesc(`Save the current prompt for \`${this.opts.targetProperty}\`.`)
       .addButton((b) => {
         b.setButtonText("Save").onClick(async () => {
           const name = window.prompt(
@@ -234,36 +233,32 @@ export class GenerateActionModal extends Modal {
         });
       });
 
-    // Model
+    // Provider + Model
     new Setting(contentEl)
-      .setName("Model")
-      .setDesc("Which configured LLM model to use for this run.")
+      .setName("Provider")
       .addDropdown((d) => {
-        for (const m of enabled) {
-          d.addOption(m.id, modelLabel(m));
+        for (const p of enabledProviders) {
+          d.addOption(p.id, `${p.displayName}  ·  ${PROVIDER_LABELS[p.type]}`);
         }
-        if (this.selectedModelId) d.setValue(this.selectedModelId);
+        if (this.selectedProviderId) d.setValue(this.selectedProviderId);
         d.onChange((v) => {
-          this.selectedModelId = v;
+          this.selectedProviderId = v;
+          this.initModelForProvider();
+          this.onOpen();
         });
       });
+
+    this.renderModelRow(contentEl);
 
     // Notes scope
     new Setting(contentEl)
       .setName("Notes scope")
-      .setDesc("Which notes the action runs on.")
       .addDropdown((d) => {
         const active = this.opts.activeFile ?? this.app.workspace.getActiveFile();
         if (active) d.addOption("active-note", `Active note (${active.basename})`);
-        d.addOption(
-          "matched",
-          `Matched notes (${this.opts.matchedRows.length})`,
-        );
+        d.addOption("matched", `Matched notes (${this.opts.matchedRows.length})`);
         if (this.opts.tickedRows.length > 0) {
-          d.addOption(
-            "selected",
-            `Selected only (${this.opts.tickedRows.length})`,
-          );
+          d.addOption("selected", `Selected only (${this.opts.tickedRows.length})`);
         }
         d.setValue(this.noteScope);
         d.onChange((v) => {
@@ -280,22 +275,135 @@ export class GenerateActionModal extends Modal {
         });
       });
 
+    // Advanced toggle
+    new Setting(contentEl)
+      .setName("Advanced decode parameters")
+      .setDesc("Override max tokens, temperature, thinking budget for this run.")
+      .addToggle((t) => {
+        t.setValue(this.showAdvanced).onChange((v) => {
+          this.showAdvanced = v;
+          this.onOpen();
+        });
+      });
+    if (this.showAdvanced) this.renderAdvancedRows(contentEl);
+
     this.statusEl = contentEl.createDiv({ cls: "fm-editor-modal-status" });
 
     const footer = contentEl.createDiv({ cls: "fm-editor-modal-footer" });
     const right = footer.createDiv({ cls: "fm-editor-modal-footer-right" });
-
-    const cancel = right.createEl("button", {
-      cls: "fm-editor-btn",
-      text: "Cancel",
-    });
+    const cancel = right.createEl("button", { cls: "fm-editor-btn", text: "Cancel" });
     cancel.addEventListener("click", () => this.close());
-
     const run = right.createEl("button", { cls: "fm-editor-btn mod-cta" });
     setIcon(run.createSpan(), "sparkles");
     run.createSpan({ text: "Generate" });
     run.addEventListener("click", () => this.runGeneration());
     this.runBtn = run;
+  }
+
+  private renderModelRow(parent: HTMLElement): void {
+    const provider = this.getSelectedProvider();
+    if (!provider) return;
+    const cached = provider.discoveredModels ?? [];
+    const staticSuggestions = MODEL_SUGGESTIONS[provider.type] ?? [];
+    const setting = new Setting(parent)
+      .setName("Model")
+      .setDesc(
+        cached.length > 0
+          ? `${cached.length} models cached. Edit provider in Settings to refresh.`
+          : "No cached models. Either refresh discovery in provider settings, pick from the suggestions list, or type a model id manually.",
+      );
+    const select = setting.controlEl.createEl("select");
+    select.createEl("option", { value: "", text: "(custom)" });
+    const items =
+      cached.length > 0
+        ? cached.map((c) => ({ id: c.id, label: c.label, group: c.group ?? "Available" }))
+        : staticSuggestions;
+    const groups = new Map<string, typeof items>();
+    for (const it of items) {
+      const list = groups.get(it.group ?? "Available") ?? [];
+      list.push(it);
+      groups.set(it.group ?? "Available", list);
+    }
+    for (const [g, list] of groups) {
+      const og = select.createEl("optgroup");
+      og.label = g;
+      for (const it of list) {
+        const opt = og.createEl("option", { value: it.id, text: it.label });
+        if (it.id === this.selectedModelId) opt.selected = true;
+      }
+    }
+    select.addEventListener("change", () => {
+      if (select.value) {
+        this.selectedModelId = select.value;
+        this.decode = { ...this.decode, modelId: select.value };
+      }
+    });
+    setting.addText((t) => {
+      t.setPlaceholder("or paste a model id")
+        .setValue(this.selectedModelId)
+        .onChange((v) => {
+          this.selectedModelId = v;
+          this.decode = { ...this.decode, modelId: v };
+        });
+    });
+  }
+
+  private renderAdvancedRows(parent: HTMLElement): void {
+    const provider = this.getSelectedProvider();
+    if (!provider) return;
+    const modelId = this.decode.modelId || this.selectedModelId;
+
+    new Setting(parent)
+      .setName("Max output tokens")
+      .setDesc(`Default: auto (~${recommendedMaxTokens(modelId)} based on model).`)
+      .addText((t) => {
+        t.setPlaceholder("auto")
+          .setValue(this.decode.maxTokens?.toString() ?? "")
+          .onChange((v) => {
+            const n = parseInt(v, 10);
+            this.decode.maxTokens = Number.isFinite(n) ? n : undefined;
+          });
+      });
+
+    if (!isTemperatureFixed(provider.type, modelId)) {
+      new Setting(parent)
+        .setName(`Temperature (0 - ${getMaxTemperature(provider.type)})`)
+        .setDesc("Empty = model default (0).")
+        .addText((t) => {
+          t.setPlaceholder("0")
+            .setValue(this.decode.temperature?.toString() ?? "")
+            .onChange((v) => {
+              const n = parseFloat(v);
+              this.decode.temperature = Number.isFinite(n) ? n : undefined;
+            });
+        });
+    }
+
+    if (supportsThinking(provider.type, modelId)) {
+      new Setting(parent)
+        .setName("Extended thinking")
+        .addToggle((t) => {
+          t.setValue(!!this.decode.thinkingEnabled).onChange((v) => {
+            this.decode.thinkingEnabled = v;
+            if (v && this.decode.thinkingBudgetTokens === undefined) {
+              this.decode.thinkingBudgetTokens = 10_000;
+            }
+            this.onOpen();
+          });
+        });
+      if (this.decode.thinkingEnabled) {
+        new Setting(parent)
+          .setName("Thinking budget (tokens)")
+          .addText((t) => {
+            t.setPlaceholder("10000")
+              .setValue(this.decode.thinkingBudgetTokens?.toString() ?? "10000")
+              .onChange((v) => {
+                const n = parseInt(v, 10);
+                this.decode.thinkingBudgetTokens = Number.isFinite(n) ? n : 10_000;
+              });
+          });
+      }
+    }
   }
 
   private applyPromptChoice(): void {
@@ -322,15 +430,13 @@ export class GenerateActionModal extends Modal {
   private renderEmptyState(parent: HTMLElement): void {
     parent.createDiv({
       cls: "fm-editor-modal-hint",
-      text: "No LLM model configured. Open plugin settings to add one.",
+      text: "No LLM provider configured. Open plugin settings to add one.",
     });
     const footer = parent.createDiv({ cls: "fm-editor-modal-footer" });
     const right = footer.createDiv({ cls: "fm-editor-modal-footer-right" });
     const close = right.createEl("button", { text: "Cancel", cls: "fm-editor-btn" });
     close.addEventListener("click", () => this.close());
-    const openSettings = right.createEl("button", {
-      cls: "fm-editor-btn mod-cta",
-    });
+    const openSettings = right.createEl("button", { cls: "fm-editor-btn mod-cta" });
     setIcon(openSettings.createSpan(), "settings");
     openSettings.createSpan({ text: "Open plugin settings" });
     openSettings.addEventListener("click", () => {
@@ -354,8 +460,7 @@ export class GenerateActionModal extends Modal {
           file: active,
           path: active.path,
           basename: active.basename,
-          frontmatter:
-            this.plugin.scanner.readFrontmatter(active) ?? {},
+          frontmatter: this.plugin.scanner.readFrontmatter(active) ?? {},
         },
       ];
     }
@@ -363,10 +468,12 @@ export class GenerateActionModal extends Modal {
   }
 
   private async runGeneration(): Promise<void> {
-    const model = this.plugin.settings.models.find(
-      (m) => m.id === this.selectedModelId,
-    );
-    if (!model) {
+    const provider = this.getSelectedProvider();
+    if (!provider) {
+      new Notice("Pick a provider");
+      return;
+    }
+    if (!this.selectedModelId) {
       new Notice("Pick a model");
       return;
     }
@@ -377,7 +484,10 @@ export class GenerateActionModal extends Modal {
     }
     if (this.runBtn) this.runBtn.setAttribute("disabled", "true");
 
-    // Build an ad-hoc preset for this run.
+    // Persist last-used model per provider.
+    this.plugin.settings.lastUsedModelByProvider[provider.id] = this.selectedModelId;
+    await this.plugin.saveSettings();
+
     const adhoc: GeneratorPreset = {
       id: "adhoc",
       displayName: "Ad-hoc",
@@ -400,10 +510,8 @@ export class GenerateActionModal extends Modal {
         const v = r.frontmatter[this.opts.targetProperty];
         if (v && typeof v === "object" && !Array.isArray(v)) {
           const o = v as { topics?: unknown; concepts?: unknown };
-          if (Array.isArray(o.topics))
-            for (const t of o.topics) knownTopics.push(String(t));
-          if (Array.isArray(o.concepts))
-            for (const c of o.concepts) knownConcepts.push(String(c));
+          if (Array.isArray(o.topics)) for (const t of o.topics) knownTopics.push(String(t));
+          if (Array.isArray(o.concepts)) for (const c of o.concepts) knownConcepts.push(String(c));
         }
       }
     }
@@ -412,7 +520,8 @@ export class GenerateActionModal extends Modal {
     try {
       const result = await this.plugin.generator.run({
         preset: adhoc,
-        model,
+        provider,
+        model: { ...this.decode, modelId: this.selectedModelId },
         language: this.plugin.settings.generatorLanguage,
         targets: files,
         skipIfPropertyExists: this.skipIfPropertyExists,
@@ -453,11 +562,6 @@ export class GenerateActionModal extends Modal {
   onClose(): void {
     this.contentEl.empty();
   }
-}
-
-function modelLabel(model: CustomModel): string {
-  const display = model.displayName || model.name;
-  return `${display}  ·  ${model.provider}`;
 }
 
 function dedupCi(items: string[]): string[] {

@@ -2,7 +2,8 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 import type {
   CompletionRequest,
   CompletionResult,
-  CustomModel,
+  ProviderConfig,
+  RunModelOptions,
 } from "../../types/llm";
 import {
   DEFAULT_BASE_URLS,
@@ -16,25 +17,28 @@ const ANTHROPIC_VERSION = "2023-06-01";
 export class AnthropicProvider implements ApiHandler {
   readonly providerType = "anthropic";
 
-  constructor(private model: CustomModel) {}
+  constructor(
+    private provider: ProviderConfig,
+    private model: RunModelOptions,
+  ) {}
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
-    if (!this.model.apiKey && !this.model.useGateway) {
+    if (!this.provider.apiKey && !this.provider.useGateway) {
       throw new ProviderError(
-        "Anthropic model has no API key configured.",
+        "Anthropic provider has no API key configured.",
         "anthropic",
       );
     }
     const baseUrl = (
-      this.model.baseUrl ?? DEFAULT_BASE_URLS.anthropic!
+      this.provider.baseUrl ?? DEFAULT_BASE_URLS.anthropic!
     ).replace(/\/+$/, "");
     const url = `${baseUrl}/v1/messages`;
 
     const maxTokens =
-      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.name);
+      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.modelId);
 
     const body: Record<string, unknown> = {
-      model: this.model.name,
+      model: this.model.modelId,
       max_tokens: maxTokens,
       system: req.systemPrompt,
       messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
@@ -57,10 +61,10 @@ export class AnthropicProvider implements ApiHandler {
       "Content-Type": "application/json",
       "anthropic-version": ANTHROPIC_VERSION,
     };
-    if (this.model.useGateway && this.model.gatewayHeaderName) {
-      headers[this.model.gatewayHeaderName] = this.model.gatewayHeaderValue ?? "";
+    if (this.provider.useGateway && this.provider.gatewayHeaderName) {
+      headers[this.provider.gatewayHeaderName] = this.provider.gatewayHeaderValue ?? "";
     }
-    if (this.model.apiKey) headers["x-api-key"] = this.model.apiKey;
+    if (this.provider.apiKey) headers["x-api-key"] = this.provider.apiKey;
 
     const request: RequestUrlParam = {
       url,
@@ -94,7 +98,7 @@ export class AnthropicProvider implements ApiHandler {
         inputTokens: json.usage?.input_tokens,
         outputTokens: json.usage?.output_tokens,
       },
-      model: json.model ?? this.model.name,
+      model: json.model ?? this.model.modelId,
     };
   }
 

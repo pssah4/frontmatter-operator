@@ -4,7 +4,7 @@ import type {
   GeneratorLanguage,
   GeneratorPreset,
 } from "../../types/generators";
-import type { CustomModel } from "../../types/llm";
+import type { ProviderConfig, RunModelOptions } from "../../types/llm";
 import { buildApiHandler } from "../../api/ProviderRegistry";
 import type FrontmatterEditorPlugin from "../../main";
 import { parseResponse } from "./parsers";
@@ -18,7 +18,8 @@ export interface GeneratorRunResult {
 
 export interface GeneratorRunOptions {
   preset: GeneratorPreset;
-  model: CustomModel;
+  provider: ProviderConfig;
+  model: RunModelOptions;
   language: GeneratorLanguage;
   /** Notes to process. */
   targets: TFile[];
@@ -57,7 +58,7 @@ export class GeneratorService {
       errorCount: 0,
       errors: [],
     };
-    const handler = await buildApiHandler(opts.model, this.plugin);
+    const handler = await buildApiHandler(opts.provider, opts.model, this.plugin);
     const prompts = opts.preset.prompts[opts.language];
     if (!prompts) {
       throw new Error(

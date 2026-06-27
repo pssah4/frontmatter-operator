@@ -1,4 +1,4 @@
-import type { CustomModel } from "./llm";
+import type { ProviderConfig } from "./llm";
 import type {
   CustomPromptTemplate,
   GeneratorLanguage,
@@ -7,18 +7,20 @@ import type {
 import { DEFAULT_PRESETS } from "./generators";
 
 export interface FrontmatterEditorSettings {
-  /** All configured models -- replaces the old providers[] bucket. */
-  models: CustomModel[];
-  /** Id of the model used by default in the generator modal. */
-  defaultModelId: string | null;
+  /** Provider accounts. Each one is an (identity + auth + discovery cache) tuple. */
+  providers: ProviderConfig[];
+  /** Default provider used by the AI chat / generator. */
+  defaultProviderId: string | null;
+  /** Sticky per-provider model picker: { providerId -> modelId }. */
+  lastUsedModelByProvider: Record<string, string>;
   /** Language for the built-in preset prompts. */
   generatorLanguage: GeneratorLanguage;
-  /** Built-in + user-added presets. Custom prompts override the defaults. */
+  /** Built-in + custom-edited presets. */
   presets: GeneratorPreset[];
   /** Saved ad-hoc prompts grouped by target property. */
   customPrompts: CustomPromptTemplate[];
 
-  // --- OAuth-managed credentials. Stored encrypted via SafeStorage when available.
+  // OAuth-managed credentials (encrypted via SafeStorage at rest).
   githubCopilotAccessToken?: string;
   githubCopilotToken?: string;
   githubCopilotTokenExpiresAt?: number;
@@ -37,8 +39,9 @@ export interface FrontmatterEditorSettings {
 }
 
 export const DEFAULT_SETTINGS: FrontmatterEditorSettings = {
-  models: [],
-  defaultModelId: null,
+  providers: [],
+  defaultProviderId: null,
+  lastUsedModelByProvider: {},
   generatorLanguage: "en",
   presets: DEFAULT_PRESETS,
   customPrompts: [],

@@ -2,59 +2,40 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 import type {
   CompletionRequest,
   CompletionResult,
-  CustomModel,
+  ProviderConfig,
+  RunModelOptions,
 } from "../../types/llm";
 import { ProviderError, recommendedMaxTokens } from "../../types/llm";
 import type { ApiHandler } from "../types";
 import { signSigV4 } from "../../auth/AwsSigV4";
 import { scrubAwsError } from "../fetchModels";
 
-/**
- * Amazon Bedrock. Three auth modes:
- *
- * - api-key: Bedrock API Key (bearer-like). Endpoint: bedrock-runtime in
- *   the configured region, header `Authorization: Bearer <key>`. Simplest
- *   mode and ships in Phase 1.
- *
- * - gateway: enterprise gateway in front of Bedrock with a static header.
- *   Same Anthropic Messages payload as native, plus the custom header.
- *
- * - access-key: AWS SigV4 with IAM access key. Full SigV4 implementation in
- *   src/auth/AwsSigV4.ts; we sign the InvokeModel POST against
- *   bedrock-runtime in the configured region.
- *
- * Bedrock always speaks the Anthropic Messages format when the model id
- * is anthropic.claude-*; other model families (Nova, Llama) use the
- * inference-profile + InvokeModel route. Phase 1 only supports the
- * Anthropic family because the property generator only needs one model.
- */
 export class BedrockProvider implements ApiHandler {
   readonly providerType = "bedrock";
 
-  constructor(private model: CustomModel) {}
+  constructor(
+    private provider: ProviderConfig,
+    private model: RunModelOptions,
+  ) {}
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
-    const region = this.model.awsRegion ?? "eu-central-1";
+    const region = this.provider.awsRegion ?? "eu-central-1";
     const baseUrl = `https://bedrock-runtime.${region}.amazonaws.com`;
-    const profile = this.model.name; // e.g. "eu.anthropic.claude-opus-4-6-v1"
-    // Note: we deliberately do NOT encodeURIComponent here. The SigV4 signer
-    // canonicalizes the path itself; if we pre-encoded, the path arrives at
-    // the signer already percent-escaped (URL.pathname preserves it), and
-    // the canonical-vs-wire mismatch produces SignatureDoesNotMatch. The
-    // canonicalizer is idempotent and the wire request will carry the
-    // correctly-encoded form regardless.
+    const profile = this.model.modelId;
+    // raw modelId -- the SigV4 canonicalizer is the single source of truth for
+    // path encoding. Pre-encoding would double-encode (see audit fix).
     const url = `${baseUrl}/model/${profile}/invoke`;
 
     const isAnthropic = /anthropic\.claude/i.test(profile);
     if (!isAnthropic) {
       throw new ProviderError(
-        "Bedrock Phase 1 supports Anthropic-family models only. Use a `*.anthropic.claude-*` profile.",
+        "Bedrock currently supports Anthropic-family models only. Use an `anthropic.claude-*` profile.",
         "bedrock",
       );
     }
 
     const maxTokens =
-      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.name);
+      req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.modelId);
 
     const body: Record<string, unknown> = {
       anthropic_version: "bedrock-2023-05-31",
@@ -74,23 +55,26 @@ export class BedrockProvider implements ApiHandler {
       "Content-Type": "application/json",
       Accept: "application/json",
     };
-    const mode = this.model.awsAuthMode ?? "api-key";
+    const mode = this.provider.awsAuthMode ?? "api-key";
     if (mode === "api-key") {
-      if (!this.model.awsApiKey) {
+      if (!this.provider.awsApiKey) {
         throw new ProviderError("Bedrock api-key mode: awsApiKey missing.", "bedrock");
       }
-      headers["Authorization"] = `Bearer ${this.model.awsApiKey}`;
+      headers["Authorization"] = `Bearer ${this.provider.awsApiKey}`;
     } else if (mode === "gateway") {
-      if (!this.model.gatewayHeaderName || this.model.gatewayHeaderValue === undefined) {
+      if (
+        !this.provider.gatewayHeaderName ||
+        this.provider.gatewayHeaderValue === undefined
+      ) {
         throw new ProviderError(
           "Bedrock gateway mode: gatewayHeader missing.",
           "bedrock",
         );
       }
-      headers[this.model.gatewayHeaderName] = this.model.gatewayHeaderValue;
+      headers[this.provider.gatewayHeaderName] = this.provider.gatewayHeaderValue;
     } else {
-      // access-key mode -- sign the request with SigV4.
-      if (!this.model.awsAccessKey || !this.model.awsSecretKey) {
+      // access-key SigV4 mode.
+      if (!this.provider.awsAccessKey || !this.provider.awsSecretKey) {
         throw new ProviderError(
           "Bedrock access-key mode requires awsAccessKey and awsSecretKey.",
           "bedrock",
@@ -105,9 +89,9 @@ export class BedrockProvider implements ApiHandler {
         body: bodyStr,
         extraHeaders: { ...headers },
         credentials: {
-          accessKeyId: this.model.awsAccessKey,
-          secretAccessKey: this.model.awsSecretKey,
-          sessionToken: this.model.awsSessionToken,
+          accessKeyId: this.provider.awsAccessKey,
+          secretAccessKey: this.provider.awsSecretKey,
+          sessionToken: this.provider.awsSessionToken,
         },
       });
       const response = await requestUrl({
@@ -117,7 +101,7 @@ export class BedrockProvider implements ApiHandler {
         body: bodyStr,
         throw: false,
       });
-      return parseAnthropicResponse(response, this.model.name, this.providerType);
+      return parseAnthropicResponse(response, this.model.modelId, this.providerType);
     }
 
     const request: RequestUrlParam = {
@@ -127,9 +111,8 @@ export class BedrockProvider implements ApiHandler {
       body: JSON.stringify(body),
       throw: false,
     };
-
     const response = await requestUrl(request);
-    return parseAnthropicResponse(response, this.model.name, this.providerType);
+    return parseAnthropicResponse(response, this.model.modelId, this.providerType);
   }
 
   async ping(): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
@@ -175,11 +158,4 @@ function parseAnthropicResponse(
     },
     model: json.model ?? fallbackModel,
   };
-}
-
-function shortError(payload: unknown): string {
-  if (!payload) return "";
-  if (typeof payload === "string") return payload.slice(0, 280);
-  const obj = payload as { error?: { message?: string }; message?: string };
-  return (obj.error?.message ?? obj.message ?? JSON.stringify(payload)).slice(0, 280);
 }

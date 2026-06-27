@@ -2,35 +2,30 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 import type {
   CompletionRequest,
   CompletionResult,
-  CustomModel,
+  ProviderConfig,
+  RunModelOptions,
 } from "../../types/llm";
-import {
-  ProviderError,
-  recommendedMaxTokens,
-} from "../../types/llm";
+import { ProviderError, recommendedMaxTokens } from "../../types/llm";
 import type { ApiHandler } from "../types";
 
 const DEFAULT_HOST = "https://generativelanguage.googleapis.com/v1beta";
 
-/**
- * Google Gemini via the native Generative Language API. Note: Gemini also
- * speaks an OpenAI-compatible shape under /v1beta/openai/chat/completions,
- * but the native API exposes the full feature set (system instructions,
- * thinking budget, etc.).
- */
 export class GeminiProvider implements ApiHandler {
   readonly providerType = "gemini";
 
-  constructor(private model: CustomModel) {}
+  constructor(
+    private provider: ProviderConfig,
+    private model: RunModelOptions,
+  ) {}
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
-    if (!this.model.apiKey) {
-      throw new ProviderError("Gemini model has no API key.", "gemini");
+    if (!this.provider.apiKey) {
+      throw new ProviderError("Gemini needs an API key.", "gemini");
     }
     const host = (
-      this.model.baseUrl?.replace(/\/openai\/?$/, "") ?? DEFAULT_HOST
+      this.provider.baseUrl?.replace(/\/openai\/?$/, "") ?? DEFAULT_HOST
     ).replace(/\/+$/, "");
-    const url = `${host}/models/${this.model.name}:generateContent?key=${encodeURIComponent(this.model.apiKey)}`;
+    const url = `${host}/models/${this.model.modelId}:generateContent?key=${encodeURIComponent(this.provider.apiKey)}`;
 
     const contents = req.messages.map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
@@ -41,10 +36,9 @@ export class GeminiProvider implements ApiHandler {
       systemInstruction: { role: "system", parts: [{ text: req.systemPrompt }] },
       contents,
       generationConfig: {
-        temperature:
-          req.temperature ?? this.model.temperature ?? 0,
+        temperature: req.temperature ?? this.model.temperature ?? 0,
         maxOutputTokens:
-          req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.name),
+          req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.modelId),
       },
     };
 
@@ -66,25 +60,20 @@ export class GeminiProvider implements ApiHandler {
     }
 
     const json = response.json as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
-      usageMetadata?: {
-        promptTokenCount?: number;
-        candidatesTokenCount?: number;
-      };
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
       modelVersion?: string;
     };
-    const text = json.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text ?? "")
-      .join("") ?? "";
+    const text =
+      json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
+      "";
     return {
       text,
       usage: {
         inputTokens: json.usageMetadata?.promptTokenCount,
         outputTokens: json.usageMetadata?.candidatesTokenCount,
       },
-      model: json.modelVersion ?? this.model.name,
+      model: json.modelVersion ?? this.model.modelId,
     };
   }
 

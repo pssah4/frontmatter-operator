@@ -8,15 +8,12 @@ import {
 import {
   PROVIDER_COLORS,
   PROVIDER_LABELS,
-  type CustomModel,
+  type ProviderConfig,
 } from "../../types/llm";
-import { ModelConfigModal } from "./ModelConfigModal";
+import { ProviderDetailModal } from "./ProviderDetailModal";
 
 export class FrontmatterEditorSettingsTab extends PluginSettingTab {
-  constructor(
-    app: App,
-    private plugin: FrontmatterEditorPlugin,
-  ) {
+  constructor(app: App, private plugin: FrontmatterEditorPlugin) {
     super(app, plugin);
   }
 
@@ -25,101 +22,99 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("fm-editor-settings");
 
-    this.renderModelsSection();
+    this.renderProvidersSection();
     this.renderGeneratorsSection();
   }
 
-  // ----------------------------------------------------------- MODELS
-
-  private renderModelsSection(): void {
+  private renderProvidersSection(): void {
     const { containerEl } = this;
 
-    new Setting(containerEl).setName("LLM models").setHeading();
+    new Setting(containerEl).setName("LLM providers").setHeading();
 
     containerEl.createDiv({
       cls: "fm-editor-modal-hint",
-      text: "Each entry is one configured model: a (provider, model id, credentials, decode parameters) tuple. The generator picks from this list. All 12 providers are supported -- Anthropic, OpenAI, Gemini, Ollama, LM Studio, OpenRouter, Azure OpenAI, GitHub Copilot, Kilo Gateway, Amazon Bedrock, ChatGPT (OAuth), Custom (OpenAI-compatible).",
+      text: "One provider account per row. The AI chat (Generate with AI from a column header) picks the provider and concrete model at run time. 12 provider types are supported.",
     });
 
-    if (this.plugin.settings.models.length === 0) {
+    if (this.plugin.settings.providers.length === 0) {
       containerEl.createDiv({
         cls: "fm-editor-condition-empty",
-        text: "No models configured yet. Click + Add model to start.",
+        text: "No providers configured yet. Click + Add provider to start.",
       });
     }
 
     const table = containerEl.createDiv({ cls: "fm-editor-models-table" });
-    for (const model of this.plugin.settings.models) {
-      this.renderModelRow(table, model);
+    for (const p of this.plugin.settings.providers) {
+      this.renderProviderRow(table, p);
     }
 
     new Setting(containerEl).addButton((b) => {
       b.setCta()
-        .setButtonText("+ Add model")
+        .setButtonText("+ Add provider")
         .onClick(() => {
-          new ModelConfigModal(this.app, this.plugin, null, () =>
+          new ProviderDetailModal(this.app, this.plugin, null, () =>
             this.display(),
           ).open();
         });
     });
   }
 
-  private renderModelRow(parent: HTMLElement, model: CustomModel): void {
+  private renderProviderRow(parent: HTMLElement, provider: ProviderConfig): void {
     const row = parent.createDiv({ cls: "fm-editor-model-row" });
-    if (!model.enabled) row.addClass("is-disabled");
-    if (model.id === this.plugin.settings.defaultModelId) {
+    if (!provider.enabled) row.addClass("is-disabled");
+    if (provider.id === this.plugin.settings.defaultProviderId) {
       row.addClass("is-default");
     }
 
     const badge = row.createDiv({ cls: "fm-editor-model-badge" });
-    badge.setText(PROVIDER_LABELS[model.provider]);
+    badge.setText(PROVIDER_LABELS[provider.type]);
     badge.style.setProperty(
       "background-color",
-      PROVIDER_COLORS[model.provider] ?? "#999",
+      PROVIDER_COLORS[provider.type] ?? "#999",
     );
 
     const main = row.createDiv({ cls: "fm-editor-model-main" });
     main.createDiv({
       cls: "fm-editor-model-name",
-      text: model.displayName || model.name,
+      text: provider.displayName,
     });
+    const cached = provider.discoveredModels?.length ?? 0;
     main.createDiv({
       cls: "fm-editor-model-sub",
-      text: model.displayName
-        ? `${model.name}`
-        : "",
+      text: cached === 0
+        ? "no discovery yet"
+        : `${cached} cached model${cached === 1 ? "" : "s"}`,
     });
 
     const actions = row.createDiv({ cls: "fm-editor-model-actions" });
 
-    // default-radio
-    const defaultRadio = actions.createEl("button", {
-      cls: model.id === this.plugin.settings.defaultModelId
-        ? "fm-editor-btn fm-editor-btn-primary"
-        : "fm-editor-btn",
+    const defaultBtn = actions.createEl("button", {
+      cls:
+        provider.id === this.plugin.settings.defaultProviderId
+          ? "fm-editor-btn fm-editor-btn-primary"
+          : "fm-editor-btn",
     });
-    defaultRadio.setText(
-      model.id === this.plugin.settings.defaultModelId ? "Default" : "Make default",
+    defaultBtn.setText(
+      provider.id === this.plugin.settings.defaultProviderId
+        ? "Default"
+        : "Make default",
     );
-    defaultRadio.disabled = !model.enabled;
-    defaultRadio.addEventListener("click", async () => {
-      this.plugin.settings.defaultModelId = model.id;
+    defaultBtn.disabled = !provider.enabled;
+    defaultBtn.addEventListener("click", async () => {
+      this.plugin.settings.defaultProviderId = provider.id;
       await this.plugin.saveSettings();
       this.display();
     });
 
-    // enable toggle
-    const enableLabel = actions.createEl("label", {
-      cls: "fm-editor-checkbox-line",
-    });
+    const enableLabel = actions.createEl("label", { cls: "fm-editor-checkbox-line" });
     const enableInput = enableLabel.createEl("input", { type: "checkbox" });
-    enableInput.checked = model.enabled;
+    enableInput.checked = provider.enabled;
     enableLabel.appendText("Enabled");
     enableInput.addEventListener("change", async () => {
-      model.enabled = enableInput.checked;
-      if (!enableInput.checked && this.plugin.settings.defaultModelId === model.id) {
-        this.plugin.settings.defaultModelId =
-          this.plugin.settings.models.find((m) => m.id !== model.id && m.enabled)
+      provider.enabled = enableInput.checked;
+      if (!enableInput.checked && this.plugin.settings.defaultProviderId === provider.id) {
+        this.plugin.settings.defaultProviderId =
+          this.plugin.settings.providers.find((p) => p.id !== provider.id && p.enabled)
             ?.id ?? null;
       }
       await this.plugin.saveSettings();
@@ -130,7 +125,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     setIcon(editBtn.createSpan(), "settings");
     editBtn.createSpan({ text: "Edit" });
     editBtn.addEventListener("click", () => {
-      new ModelConfigModal(this.app, this.plugin, model, () => this.display()).open();
+      new ProviderDetailModal(this.app, this.plugin, provider, () => this.display()).open();
     });
 
     const delBtn = actions.createEl("button", {
@@ -138,19 +133,17 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     });
     setIcon(delBtn.createSpan(), "trash-2");
     delBtn.addEventListener("click", async () => {
-      this.plugin.settings.models = this.plugin.settings.models.filter(
-        (m) => m.id !== model.id,
+      this.plugin.settings.providers = this.plugin.settings.providers.filter(
+        (p) => p.id !== provider.id,
       );
-      if (this.plugin.settings.defaultModelId === model.id) {
-        this.plugin.settings.defaultModelId =
-          this.plugin.settings.models.find((m) => m.enabled)?.id ?? null;
+      if (this.plugin.settings.defaultProviderId === provider.id) {
+        this.plugin.settings.defaultProviderId =
+          this.plugin.settings.providers.find((p) => p.enabled)?.id ?? null;
       }
       await this.plugin.saveSettings();
       this.display();
     });
   }
-
-  // ----------------------------------------------------------- GENERATORS
 
   private renderGeneratorsSection(): void {
     const { containerEl } = this;
@@ -160,7 +153,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Prompt language")
       .setDesc(
-        "Language used for the built-in generator prompts. Switch updates all presets to their localized defaults; custom edits are preserved per language.",
+        "Language used for the built-in generator prompts. Custom edits are preserved per language.",
       )
       .addDropdown((d) => {
         for (const lang of GENERATOR_LANGUAGES) {
@@ -177,56 +170,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     for (const preset of this.plugin.settings.presets) {
       this.renderPresetSection(containerEl, preset);
     }
-
     this.renderCustomPromptsSection();
-  }
-
-  private renderCustomPromptsSection(): void {
-    const { containerEl } = this;
-
-    new Setting(containerEl).setName("Custom prompts").setHeading();
-
-    containerEl.createDiv({
-      cls: "fm-editor-modal-hint",
-      text: "Saved ad-hoc prompts. Created from the Generate-with-AI modal (Save as custom prompt). Each prompt is bound to a target property and shows up in that column's generator picker.",
-    });
-
-    if (this.plugin.settings.customPrompts.length === 0) {
-      containerEl.createDiv({
-        cls: "fm-editor-condition-empty",
-        text: "No custom prompts yet.",
-      });
-      return;
-    }
-
-    for (const tpl of this.plugin.settings.customPrompts) {
-      const row = new Setting(containerEl)
-        .setName(tpl.name)
-        .setDesc(
-          `target: \`${tpl.targetProperty}\`  ·  parser: ${tpl.parser}`,
-        );
-      row.addButton((b) => {
-        b.setButtonText("Rename").onClick(async () => {
-          const next = window.prompt("Rename custom prompt", tpl.name);
-          if (!next) return;
-          tpl.name = next;
-          await this.plugin.saveSettings();
-          this.display();
-        });
-      });
-      row.addButton((b) => {
-        b.setIcon("trash-2")
-          .setWarning()
-          .onClick(async () => {
-            this.plugin.settings.customPrompts =
-              this.plugin.settings.customPrompts.filter(
-                (p) => p.id !== tpl.id,
-              );
-            await this.plugin.saveSettings();
-            this.display();
-          });
-      });
-    }
   }
 
   private renderPresetSection(
@@ -256,9 +200,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
 
     const sysSetting = new Setting(parent)
       .setName("System prompt")
-      .setDesc(
-        "Deterministic guardrail. Tells the model the expected output format.",
-      );
+      .setDesc("Deterministic guardrail.");
     sysSetting.controlEl.style.display = "block";
     sysSetting.controlEl.style.width = "100%";
     const sysTa = sysSetting.controlEl.createEl("textarea", {
@@ -273,9 +215,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
 
     const userSetting = new Setting(parent)
       .setName("User prompt")
-      .setDesc(
-        "Per-note instruction. Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}. Leave empty to use the shipped default.",
-      );
+      .setDesc("Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}.");
     userSetting.controlEl.style.display = "block";
     userSetting.controlEl.style.width = "100%";
     const userTa = userSetting.controlEl.createEl("textarea", {
@@ -287,5 +227,47 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
       preset.prompts[lang].userPrompt = userTa.value;
       await this.plugin.saveSettings();
     });
+  }
+
+  private renderCustomPromptsSection(): void {
+    const { containerEl } = this;
+
+    new Setting(containerEl).setName("Custom prompts").setHeading();
+
+    containerEl.createDiv({
+      cls: "fm-editor-modal-hint",
+      text: "Saved ad-hoc prompts. Created from the Generate-with-AI modal (Save as custom prompt).",
+    });
+
+    if (this.plugin.settings.customPrompts.length === 0) {
+      containerEl.createDiv({
+        cls: "fm-editor-condition-empty",
+        text: "No custom prompts yet.",
+      });
+      return;
+    }
+
+    for (const tpl of this.plugin.settings.customPrompts) {
+      const row = new Setting(containerEl)
+        .setName(tpl.name)
+        .setDesc(`target: \`${tpl.targetProperty}\`  ·  parser: ${tpl.parser}`);
+      row.addButton((b) => {
+        b.setButtonText("Rename").onClick(async () => {
+          const next = window.prompt("Rename custom prompt", tpl.name);
+          if (!next) return;
+          tpl.name = next;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+      row.addButton((b) => {
+        b.setIcon("trash-2").setWarning().onClick(async () => {
+          this.plugin.settings.customPrompts =
+            this.plugin.settings.customPrompts.filter((p) => p.id !== tpl.id);
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+    }
   }
 }

@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
-import type { CustomModel, ProviderType } from "../types/llm";
+import type { ProviderConfig, ProviderType } from "../types/llm";
 import { DEFAULT_BASE_URLS } from "../types/llm";
 import { signSigV4 } from "../auth/AwsSigV4";
 
@@ -23,17 +23,17 @@ export interface FetchResult {
  * fails.
  */
 export async function fetchModels(
-  draft: CustomModel,
+  draft: ProviderConfig,
   plugin: FrontmatterEditorPlugin,
 ): Promise<FetchResult> {
   try {
-    switch (draft.provider) {
+    switch (draft.type) {
       case "openai":
       case "openrouter":
       case "custom":
       case "lmstudio":
       case "azure":
-        return await fetchOpenAICompatible(draft, plugin, draft.provider);
+        return await fetchOpenAICompatible(draft, plugin, draft.type);
       case "ollama":
         return await fetchOllama(draft);
       case "gemini":
@@ -63,7 +63,7 @@ export async function fetchModels(
 // ---------------------------------------------------------------- OPENAI-LIKE
 
 async function fetchOpenAICompatible(
-  draft: CustomModel,
+  draft: ProviderConfig,
   plugin: FrontmatterEditorPlugin,
   provider: ProviderType,
 ): Promise<FetchResult> {
@@ -143,7 +143,7 @@ function filterGroupForOpenAI(
 
 // ---------------------------------------------------------------- OLLAMA
 
-async function fetchOllama(draft: CustomModel): Promise<FetchResult> {
+async function fetchOllama(draft: ProviderConfig): Promise<FetchResult> {
   const baseUrl = (draft.baseUrl ?? DEFAULT_BASE_URLS.ollama!).replace(
     /\/+$/,
     "",
@@ -168,7 +168,7 @@ async function fetchOllama(draft: CustomModel): Promise<FetchResult> {
 
 // ---------------------------------------------------------------- GEMINI
 
-async function fetchGemini(draft: CustomModel): Promise<FetchResult> {
+async function fetchGemini(draft: ProviderConfig): Promise<FetchResult> {
   if (!draft.apiKey) {
     return { ok: false, models: [], error: "Gemini needs an API key." };
   }
@@ -212,7 +212,7 @@ async function fetchGemini(draft: CustomModel): Promise<FetchResult> {
 
 // ---------------------------------------------------------------- ANTHROPIC
 
-async function fetchAnthropic(draft: CustomModel): Promise<FetchResult> {
+async function fetchAnthropic(draft: ProviderConfig): Promise<FetchResult> {
   if (!draft.apiKey) {
     return { ok: false, models: [], error: "Anthropic needs an API key." };
   }
@@ -379,7 +379,7 @@ async function fetchChatGptOAuth(
 
 // ---------------------------------------------------------------- BEDROCK
 
-async function fetchBedrock(draft: CustomModel): Promise<FetchResult> {
+async function fetchBedrock(draft: ProviderConfig): Promise<FetchResult> {
   if (!draft.awsAccessKey || !draft.awsSecretKey) {
     return {
       ok: false,

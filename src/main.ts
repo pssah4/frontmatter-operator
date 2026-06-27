@@ -159,14 +159,25 @@ export default class FrontmatterEditorPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const stored = (await this.loadData()) as Partial<FrontmatterEditorSettings> | null;
+    const stored = (await this.loadData()) as
+      | (Partial<FrontmatterEditorSettings> & {
+          models?: unknown[];
+        })
+      | null;
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...(stored ?? {}),
-      models: stored?.models ?? [],
+      providers: stored?.providers ?? [],
+      lastUsedModelByProvider: stored?.lastUsedModelByProvider ?? {},
       presets: this.mergePresets(stored?.presets),
       customPrompts: stored?.customPrompts ?? [],
     };
+    // Drop the legacy `models` array if it's still in data.json -- the new
+    // schema is provider-centric and incompatible with the old per-model
+    // entity. Users re-add via "+ Add provider".
+    if (stored && "models" in stored) {
+      await this.saveSettings();
+    }
   }
 
   async saveSettings(): Promise<void> {
