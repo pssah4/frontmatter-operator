@@ -1198,6 +1198,43 @@
   line-height: 1.5;
 }
 
+.fm-editor-oauth-code {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2);
+  margin: var(--size-4-2) 0;
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.fm-editor-oauth-code-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-weight: var(--font-bold);
+}
+
+.fm-editor-oauth-code-value {
+  font-family: var(--font-monospace);
+  font-size: 18px;
+  font-weight: var(--font-bold);
+  letter-spacing: 0.08em;
+  color: var(--interactive-accent);
+  user-select: all;
+  background: var(--background-primary);
+  padding: var(--size-2-2) var(--size-4-2);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.fm-editor-oauth-link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  margin: var(--size-4-2) 0;
+}
+
 .fm-editor-models-table {
   display: flex;
   flex-direction: column;

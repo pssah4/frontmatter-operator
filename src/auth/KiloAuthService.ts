@@ -26,22 +26,33 @@ interface TokenResponse {
   error?: string;
 }
 
+export interface KiloSignInController {
+  showUserCode: (info: { userCode: string; verificationUri: string }) => void;
+  setStatus: (text: string) => void;
+  signal?: AbortSignal;
+}
+
 export class KiloAuthService {
   constructor(private plugin: FrontmatterEditorPlugin) {}
 
-  async signInWithDeviceFlow(
-    onUserCode: (info: { userCode: string; verificationUri: string }) => void,
-  ): Promise<void> {
+  async signInWithDeviceFlow(controller: KiloSignInController): Promise<void> {
+    controller.setStatus("Requesting device code...");
     const code = await this.requestDeviceCode();
-    onUserCode({ userCode: code.user_code, verificationUri: code.verification_uri });
+    controller.showUserCode({
+      userCode: code.user_code,
+      verificationUri: code.verification_uri,
+    });
+    controller.setStatus("Waiting for you to authorize in the browser...");
+    const intervalMs = Math.max(POLL_INTERVAL_MS, (code.interval ?? 5) * 1000);
     for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
-      await wait(Math.max(POLL_INTERVAL_MS, (code.interval ?? 5) * 1000));
+      if (controller.signal?.aborted) throw new Error("Sign-in cancelled");
+      await wait(intervalMs);
       const token = await this.tryExchange(code.device_code);
       if (token?.access_token) {
         this.plugin.settings.kiloToken = token.access_token;
         this.plugin.settings.kiloAuthMode = "device-auth";
         await this.plugin.saveSettings();
-        new Notice("Kilo Gateway authorized.");
+        controller.setStatus("Authorized.");
         return;
       }
     }

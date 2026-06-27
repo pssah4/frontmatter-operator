@@ -36,7 +36,9 @@ function nodeRequire<T = unknown>(id: string): T {
   return (window as unknown as { require: (id: string) => T }).require(id);
 }
 
-export async function startLoopbackServer(): Promise<ServerHandle> {
+export async function startLoopbackServer(
+  preferredPort = 0,
+): Promise<ServerHandle> {
   let http: HttpServerModule;
   try {
     http = nodeRequire<HttpServerModule>("http");
@@ -55,7 +57,7 @@ export async function startLoopbackServer(): Promise<ServerHandle> {
 
   const server = http.createServer((req, res) => {
     const url = req.url ?? "";
-    if (url.startsWith("/callback")) {
+    if (url.startsWith("/auth/callback") || url.startsWith("/callback")) {
       const params = parseQuery(url.split("?")[1] ?? "");
       const code = params.code;
       const error = params.error;
@@ -84,7 +86,7 @@ export async function startLoopbackServer(): Promise<ServerHandle> {
 
   await new Promise<void>((resolve, reject) => {
     server.on("error", (err) => reject(err));
-    server.listen(0, "127.0.0.1", () => resolve());
+    server.listen(preferredPort, "127.0.0.1", () => resolve());
   });
 
   const addr = server.address();

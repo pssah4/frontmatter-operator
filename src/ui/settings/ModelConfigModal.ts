@@ -1,5 +1,6 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
+import { OAuthProgressModal } from "../modals/OAuthProgressModal";
 import {
   DEFAULT_BASE_URLS,
   DEFAULT_API_VERSIONS,
@@ -313,33 +314,8 @@ export class ModelConfigModal extends Modal {
   private renderOAuthRow(parent: HTMLElement, kind: ProviderType): void {
     const setting = new Setting(parent).setName("Account").setDesc(oauthHint(kind, this.plugin));
     setting.addButton((b) => {
-      b.setButtonText(oauthButtonLabel(kind, this.plugin)).onClick(async () => {
-        try {
-          if (kind === "github-copilot") {
-            await this.plugin.copilotAuth.signIn(({ userCode, verificationUri }) => {
-              new Notice(
-                `GitHub code: ${userCode}\nOpen ${verificationUri} to authorize.`,
-                30_000,
-              );
-              window.open(verificationUri, "_blank");
-            });
-          } else if (kind === "chatgpt-oauth") {
-            await this.plugin.chatgptAuth.signIn();
-          } else if (kind === "kilo-gateway") {
-            await this.plugin.kiloAuth.signInWithDeviceFlow(
-              ({ userCode, verificationUri }) => {
-                new Notice(
-                  `Kilo code: ${userCode}\nOpen ${verificationUri} to authorize.`,
-                  30_000,
-                );
-                window.open(verificationUri, "_blank");
-              },
-            );
-          }
-          this.onOpen();
-        } catch (err) {
-          new Notice(`Auth failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
+      b.setButtonText(oauthButtonLabel(kind, this.plugin)).onClick(() => {
+        this.startOAuth(kind);
       });
     });
     if (oauthIsSignedIn(kind, this.plugin)) {
@@ -376,6 +352,58 @@ export class ModelConfigModal extends Modal {
           );
         });
     }
+  }
+
+  private startOAuth(kind: ProviderType): void {
+    const titleByKind: Record<string, string> = {
+      "github-copilot": "Sign in to GitHub Copilot",
+      "chatgpt-oauth": "Sign in to ChatGPT",
+      "kilo-gateway": "Sign in to Kilo Gateway",
+    };
+    const descByKind: Record<string, string> = {
+      "github-copilot":
+        "Device-Flow against github.com. Click the button to open the verification page; type the code shown below.",
+      "chatgpt-oauth":
+        "PKCE Loopback against auth.openai.com. The plugin will bind localhost:1455 and open your browser for authorization.",
+      "kilo-gateway":
+        "Device-Flow against api.kilo.ai. Click the button to open the verification page; type the code shown below.",
+    };
+    new OAuthProgressModal(
+      this.app,
+      {
+        title: titleByKind[kind] ?? "Sign in",
+        description: descByKind[kind] ?? "",
+        initialStatus: "Starting...",
+      },
+      async (ctrl) => {
+        try {
+          if (kind === "github-copilot") {
+            await this.plugin.copilotAuth.signIn({
+              showUserCode: (info) => ctrl.showUserCode(info),
+              setStatus: (text) => ctrl.setStatus(text),
+              signal: ctrl.signal,
+            });
+          } else if (kind === "chatgpt-oauth") {
+            await this.plugin.chatgptAuth.signIn({
+              setStatus: (text) => ctrl.setStatus(text),
+              showAuthLink: (url) =>
+                ctrl.showUserCode({ userCode: "(no code)", verificationUri: url }),
+              signal: ctrl.signal,
+            });
+          } else if (kind === "kilo-gateway") {
+            await this.plugin.kiloAuth.signInWithDeviceFlow({
+              showUserCode: (info) => ctrl.showUserCode(info),
+              setStatus: (text) => ctrl.setStatus(text),
+              signal: ctrl.signal,
+            });
+          }
+          ctrl.finish();
+          this.onOpen();
+        } catch (err) {
+          ctrl.fail(err instanceof Error ? err.message : String(err));
+        }
+      },
+    ).open();
   }
 
   private renderMaxTokensRow(parent: HTMLElement): void {
