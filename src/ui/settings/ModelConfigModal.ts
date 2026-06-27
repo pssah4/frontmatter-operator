@@ -1,6 +1,7 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import { OAuthProgressModal } from "../modals/OAuthProgressModal";
+import { fetchModels, type FetchedModel } from "../../api/fetchModels";
 import {
   DEFAULT_BASE_URLS,
   DEFAULT_API_VERSIONS,
@@ -28,6 +29,8 @@ export class ModelConfigModal extends Modal {
   private isNew: boolean;
   private testEl: HTMLElement | null = null;
   private autoMaxTokens: boolean;
+  private fetchedModels: FetchedModel[] | null = null;
+  private fetchStatusEl: HTMLElement | null = null;
 
   constructor(
     app: App,
@@ -113,32 +116,81 @@ export class ModelConfigModal extends Modal {
   }
 
   private renderSuggestionsRow(parent: HTMLElement): void {
-    const items = MODEL_SUGGESTIONS[this.form.provider] ?? [];
-    if (items.length === 0) return;
+    // Live-fetched list first; static suggestions as fallback.
+    const fetched = this.fetchedModels;
+    const staticItems = MODEL_SUGGESTIONS[this.form.provider] ?? [];
+    const items: Array<{ id: string; label: string; group: string }> =
+      fetched && fetched.length > 0
+        ? fetched.map((m) => ({
+            id: m.id,
+            label: m.label,
+            group: m.group ?? "Available",
+          }))
+        : staticItems;
+
     const setting = new Setting(parent)
-      .setName("Quick-pick")
-      .setDesc("Pick a model id from the recommended list.");
-    const groups = new Map<string, typeof items>();
-    for (const it of items) {
-      const list = groups.get(it.group) ?? [];
-      list.push(it);
-      groups.set(it.group, list);
-    }
-    const select = setting.controlEl.createEl("select");
-    select.createEl("option", { value: "", text: "(custom)" });
-    for (const [group, list] of groups) {
-      const optgroup = select.createEl("optgroup");
-      optgroup.label = group;
-      for (const it of list) {
-        const opt = optgroup.createEl("option", { value: it.id, text: it.label });
-        if (it.id === this.form.name) opt.selected = true;
+      .setName("Model picker")
+      .setDesc(
+        fetched
+          ? `${fetched.length} model${fetched.length === 1 ? "" : "s"} fetched from the provider.`
+          : "Pick from the recommended list, or click Fetch to load the provider's live model list.",
+      );
+
+    if (items.length > 0) {
+      const groups = new Map<string, typeof items>();
+      for (const it of items) {
+        const list = groups.get(it.group) ?? [];
+        list.push(it);
+        groups.set(it.group, list);
       }
-    }
-    select.addEventListener("change", () => {
-      if (select.value) {
-        this.form.name = select.value;
-        this.onOpen();
+      const select = setting.controlEl.createEl("select");
+      select.createEl("option", { value: "", text: "(custom)" });
+      for (const [group, list] of groups) {
+        const optgroup = select.createEl("optgroup");
+        optgroup.label = group;
+        for (const it of list) {
+          const opt = optgroup.createEl("option", {
+            value: it.id,
+            text: it.label === it.id ? it.id : `${it.label} (${it.id})`,
+          });
+          if (it.id === this.form.name) opt.selected = true;
+        }
       }
+      select.addEventListener("change", () => {
+        if (select.value) {
+          this.form.name = select.value;
+          this.onOpen();
+        }
+      });
+    }
+
+    setting.addButton((b) => {
+      b.setButtonText(fetched ? "Re-fetch" : "Fetch models").onClick(async () => {
+        if (this.fetchStatusEl) this.fetchStatusEl.setText("Fetching...");
+        try {
+          const result = await fetchModels(this.form, this.plugin);
+          if (!result.ok) {
+            if (this.fetchStatusEl)
+              this.fetchStatusEl.setText(`Failed: ${result.error}`);
+            new Notice(`Fetch failed: ${result.error}`);
+            return;
+          }
+          this.fetchedModels = result.models;
+          if (this.fetchStatusEl)
+            this.fetchStatusEl.setText(
+              `Fetched ${result.models.length} model${result.models.length === 1 ? "" : "s"}.`,
+            );
+          this.onOpen();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (this.fetchStatusEl) this.fetchStatusEl.setText(`Failed: ${message}`);
+          new Notice(`Fetch failed: ${message}`);
+        }
+      });
+    });
+
+    this.fetchStatusEl = setting.controlEl.createDiv({
+      cls: "fm-editor-modal-status",
     });
   }
 

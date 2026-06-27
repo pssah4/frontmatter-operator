@@ -988,6 +988,19 @@ export class FrontmatterEditorView extends ItemView {
     });
 
     const targetCount = this.getTargetRows().length;
+
+    this.menuItem(
+      menu,
+      "sparkles",
+      `Generate with AI for "${col.property}"...`,
+      false,
+      () => {
+        this.openGenerateModalForProperty(col.property);
+      },
+    );
+
+    this.menuDivider(menu);
+
     const delItem = this.menuItem(
       menu,
       "trash-2",
@@ -1203,14 +1216,6 @@ export class FrontmatterEditorView extends ItemView {
     );
     delBtn.addClass("fm-editor-btn-destructive");
     delBtn.addEventListener("click", () => this.openDeleteModal());
-
-    const aiBtn = this.makeActionButton(
-      buttons,
-      "sparkles",
-      "Generate with AI",
-      "Use an LLM provider to fill description, keywords/tags or moc on the matched notes",
-    );
-    aiBtn.addEventListener("click", () => this.openGenerateModal());
   }
 
   private makeActionButton(
@@ -1341,12 +1346,22 @@ export class FrontmatterEditorView extends ItemView {
     ).open();
   }
 
-  private openGenerateModal(): void {
+  private openGenerateModalForProperty(targetProperty: string): void {
     const matched = this.filteredRows;
     const ticked = matched.filter((r) => this.selectedPaths.has(r.path));
-    new GenerateActionModal(this.app, this.plugin, matched, ticked, () => {
-      void this.refreshScan().then(() => this.render());
-    }).open();
+    new GenerateActionModal(
+      this.app,
+      this.plugin,
+      {
+        targetProperty,
+        matchedRows: matched,
+        tickedRows: ticked,
+        activeFile: this.app.workspace.getActiveFile() ?? null,
+      },
+      () => {
+        void this.refreshScan().then(() => this.render());
+      },
+    ).open();
   }
 
   private openDeleteForProperty(property: string): void {

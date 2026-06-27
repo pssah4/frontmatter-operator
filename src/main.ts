@@ -165,6 +165,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
       ...(stored ?? {}),
       models: stored?.models ?? [],
       presets: this.mergePresets(stored?.presets),
+      customPrompts: stored?.customPrompts ?? [],
     };
   }
 

@@ -1,5 +1,9 @@
 import type { CustomModel } from "./llm";
-import type { GeneratorLanguage, GeneratorPreset } from "./generators";
+import type {
+  CustomPromptTemplate,
+  GeneratorLanguage,
+  GeneratorPreset,
+} from "./generators";
 import { DEFAULT_PRESETS } from "./generators";
 
 export interface FrontmatterEditorSettings {
@@ -11,6 +15,8 @@ export interface FrontmatterEditorSettings {
   generatorLanguage: GeneratorLanguage;
   /** Built-in + user-added presets. Custom prompts override the defaults. */
   presets: GeneratorPreset[];
+  /** Saved ad-hoc prompts grouped by target property. */
+  customPrompts: CustomPromptTemplate[];
 
   // --- OAuth-managed credentials. Stored encrypted via SafeStorage when available.
   githubCopilotAccessToken?: string;
@@ -35,4 +41,5 @@ export const DEFAULT_SETTINGS: FrontmatterEditorSettings = {
   defaultModelId: null,
   generatorLanguage: "en",
   presets: DEFAULT_PRESETS,
+  customPrompts: [],
 };

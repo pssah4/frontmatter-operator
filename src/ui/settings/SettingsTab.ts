@@ -177,6 +177,56 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     for (const preset of this.plugin.settings.presets) {
       this.renderPresetSection(containerEl, preset);
     }
+
+    this.renderCustomPromptsSection();
+  }
+
+  private renderCustomPromptsSection(): void {
+    const { containerEl } = this;
+
+    new Setting(containerEl).setName("Custom prompts").setHeading();
+
+    containerEl.createDiv({
+      cls: "fm-editor-modal-hint",
+      text: "Saved ad-hoc prompts. Created from the Generate-with-AI modal (Save as custom prompt). Each prompt is bound to a target property and shows up in that column's generator picker.",
+    });
+
+    if (this.plugin.settings.customPrompts.length === 0) {
+      containerEl.createDiv({
+        cls: "fm-editor-condition-empty",
+        text: "No custom prompts yet.",
+      });
+      return;
+    }
+
+    for (const tpl of this.plugin.settings.customPrompts) {
+      const row = new Setting(containerEl)
+        .setName(tpl.name)
+        .setDesc(
+          `target: \`${tpl.targetProperty}\`  ·  parser: ${tpl.parser}`,
+        );
+      row.addButton((b) => {
+        b.setButtonText("Rename").onClick(async () => {
+          const next = window.prompt("Rename custom prompt", tpl.name);
+          if (!next) return;
+          tpl.name = next;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+      row.addButton((b) => {
+        b.setIcon("trash-2")
+          .setWarning()
+          .onClick(async () => {
+            this.plugin.settings.customPrompts =
+              this.plugin.settings.customPrompts.filter(
+                (p) => p.id !== tpl.id,
+              );
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+    }
   }
 
   private renderPresetSection(

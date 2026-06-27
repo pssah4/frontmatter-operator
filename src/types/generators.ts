@@ -127,3 +127,30 @@ export const DEFAULT_PRESETS: GeneratorPreset[] = [
 export function clonePreset(preset: GeneratorPreset): GeneratorPreset {
   return JSON.parse(JSON.stringify(preset)) as GeneratorPreset;
 }
+
+/**
+ * User-defined ad-hoc prompt template. Saved per-property; the user can
+ * recall any of them in the Generate-with-AI mini-chat.
+ */
+export interface CustomPromptTemplate {
+  id: string;
+  name: string;
+  targetProperty: string;
+  parser: GeneratorParserId;
+  systemPrompt: string;
+  userPrompt: string;
+}
+
+export function emptyCustomPrompt(targetProperty: string): CustomPromptTemplate {
+  return {
+    id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `cp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: `Custom for ${targetProperty}`,
+    targetProperty,
+    parser: "single_line_text",
+    systemPrompt: "",
+    userPrompt: "",
+  };
+}
