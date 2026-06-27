@@ -44,14 +44,20 @@ export async function buildApiHandler(
           provider.type,
         );
       }
+      // VO uses api.githubcopilot.com (NOT api.individual.githubcopilot.com).
+      // The chat-completions endpoint requires max_completion_tokens, not
+      // max_tokens, and the VS Code headers below or the request is
+      // refused.
       return new OpenAICompatibleProvider(provider, model, {
-        baseUrlOverride: "https://api.individual.githubcopilot.com",
+        baseUrlOverride: "https://api.githubcopilot.com",
         overrideToken: token,
         extraHeaders: {
           "Editor-Version": "vscode/1.95.0",
-          "Editor-Plugin-Version": "frontmatter-editor/0.1",
+          "Editor-Plugin-Version": "copilot-chat/0.20.0",
           "Copilot-Integration-Id": "vscode-chat",
+          "OpenAI-Intent": "conversation-panel",
         },
+        useMaxCompletionTokens: true,
       });
     }
 
@@ -72,8 +78,9 @@ export async function buildApiHandler(
       const extraHeaders: Record<string, string> = {};
       const orgId = plugin.kiloAuth.getOrgId();
       if (orgId) extraHeaders["X-KiloCode-OrganizationId"] = orgId;
+      // VO uses /api/gateway (NOT /api/openai).
       return new OpenAICompatibleProvider(provider, model, {
-        baseUrlOverride: "https://api.kilo.ai/api/openai",
+        baseUrlOverride: "https://api.kilo.ai/api/gateway",
         overrideToken: token,
         extraHeaders,
       });
@@ -93,10 +100,12 @@ export async function buildApiHandler(
           provider.type,
         );
       }
-      return new OpenAICompatibleProvider(provider, model, {
-        baseUrlOverride: "https://api.openai.com/v1",
-        overrideToken: token,
-      });
+      // ChatGPT OAuth speaks the codex-cli Responses API, NOT chat/completions.
+      // Different endpoint, different body shape; not OpenAI-compatible.
+      const { ChatGptResponsesProvider } = await import(
+        "./providers/ChatGptResponsesProvider"
+      );
+      return new ChatGptResponsesProvider(provider, model, plugin);
     }
 
     default:

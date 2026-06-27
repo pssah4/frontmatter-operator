@@ -382,7 +382,7 @@ export class FrontmatterEditorView extends ItemView {
 
     const bar = section.createDiv({ cls: "fm-editor-filter-bar" });
     const list = bar.createDiv({ cls: "fm-editor-conditions" });
-    if (this.globalFilters.length === 0) {
+    if (this.globalFilters.length === 0 && this.selectedPaths.size === 0) {
       const hint = list.createDiv({ cls: "fm-editor-condition-empty" });
       hint.setText(
         "No global conditions yet — that's fine. You can also (only) use the per-column filter row in the table below, or leave everything empty to match every note in the vault.",
@@ -391,7 +391,72 @@ export class FrontmatterEditorView extends ItemView {
       this.globalFilters.forEach((f, idx) => {
         this.renderConditionRow(list, f, idx);
       });
+      if (this.selectedPaths.size > 0) {
+        this.renderNoteSelectionChip(list, this.globalFilters.length);
+      }
     }
+  }
+
+  /**
+   * Pseudo-condition that mirrors the table tick-boxes. Shows up in the WHEN
+   * bar as "Note in [a, b, c]" while at least one row is ticked; clicking the
+   * remove button clears the selection (which also collapses the chip).
+   */
+  private renderNoteSelectionChip(parent: HTMLElement, index: number): void {
+    const row = parent.createDiv({
+      cls: "fm-editor-condition fm-editor-condition-derived",
+    });
+
+    if (index === 0) {
+      row.createSpan({
+        text: "WHERE",
+        cls: "fm-editor-condition-combinator",
+      });
+    } else {
+      row.createSpan({
+        text: "AND",
+        cls: "fm-editor-condition-combinator",
+      });
+    }
+
+    row.createSpan({
+      cls: "fm-editor-rule-summary-prop",
+      text: "Note",
+    });
+    row.createSpan({
+      cls: "fm-editor-rule-summary-op",
+      text: this.selectedPaths.size === 1 ? "equals" : "in",
+    });
+
+    const paths = Array.from(this.selectedPaths);
+    const preview = paths
+      .slice(0, 3)
+      .map((p) => p.split("/").pop()!.replace(/\.md$/, ""))
+      .join(", ");
+    const more = paths.length > 3 ? `, +${paths.length - 3}` : "";
+    const valueEl = row.createSpan({
+      cls: "fm-editor-rule-summary-val",
+      text: `"${preview}${more}"`,
+    });
+    valueEl.title = paths.join("\n");
+
+    const badge = row.createSpan({ cls: "fm-editor-condition-badge" });
+    setIcon(badge, "file-text");
+    badge.createSpan({ text: ` ${paths.length}` });
+    badge.title = `${paths.length} ticked note${paths.length === 1 ? "" : "s"}`;
+
+    const actions = row.createDiv({ cls: "fm-editor-condition-actions" });
+    const remove = this.makeIconButton(
+      actions,
+      "x",
+      "Clear note selection",
+      () => {
+        this.selectedPaths.clear();
+        this.recomputeFilteredRows();
+        this.render();
+      },
+    );
+    remove.addClass("mod-warning");
   }
 
   private renderConditionRow(
@@ -533,6 +598,19 @@ export class FrontmatterEditorView extends ItemView {
         property: "(note path)",
         operator: "in_path",
         value: this.notePathFilter,
+      });
+    }
+    if (this.selectedPaths.size > 0) {
+      const sample = Array.from(this.selectedPaths)
+        .slice(0, 2)
+        .map((p) => p.split("/").pop()!.replace(/\.md$/, ""))
+        .join(", ");
+      const suffix = this.selectedPaths.size > 2 ? `, +${this.selectedPaths.size - 2}` : "";
+      all.push({
+        id: "_selection",
+        property: "Note",
+        operator: this.selectedPaths.size === 1 ? "equals" : "in_path",
+        value: sample + suffix,
       });
     }
     if (all.length === 0) {

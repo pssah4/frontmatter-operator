@@ -24,6 +24,11 @@ export interface OpenAICompatibleOptions {
   urlOverride?: string;
   /** Provider-baseUrl override (Copilot / Kilo / ChatGPT pin custom hosts). */
   baseUrlOverride?: string;
+  /**
+   * Use `max_completion_tokens` instead of `max_tokens` (required by OpenAI,
+   * Azure, and GitHub Copilot per VO).
+   */
+  useMaxCompletionTokens?: boolean;
 }
 
 /**
@@ -67,7 +72,16 @@ export class OpenAICompatibleProvider implements ApiHandler {
     };
     const maxTokens =
       req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.modelId);
-    if (maxTokens) body.max_tokens = maxTokens;
+    if (maxTokens) {
+      // VO: OpenAI, Azure, and GitHub Copilot use max_completion_tokens; every
+      // other OpenAI-compatible endpoint sticks with max_tokens.
+      const useNew =
+        this.opts.useMaxCompletionTokens ||
+        this.provider.type === "openai" ||
+        this.provider.type === "azure";
+      if (useNew) body.max_completion_tokens = maxTokens;
+      else body.max_tokens = maxTokens;
+    }
 
     if (!isTemperatureFixed(this.provider.type, this.model.modelId)) {
       const temp = req.temperature ?? this.model.temperature ?? 0;
