@@ -117,11 +117,26 @@ export async function signSigV4(
 // ----------------------------------------------------------- helpers
 
 function canonicalizePath(path: string): string {
-  // RFC 3986 path -- encode each segment, keep the slashes.
+  // Idempotent: decode each segment first so already-percent-encoded
+  // characters in the input URL are not double-encoded. URL.pathname
+  // preserves the percent-encoded form of any reserved character that the
+  // caller has pre-encoded (e.g. `:` in a Bedrock model id `claude-...v1:0`
+  // ends up as `%3A` in pathname). Without the decode step the canonical
+  // path would carry `%253A` while the wire path carries `%3A`, producing
+  // SignatureDoesNotMatch.
   return path
     .split("/")
-    .map((s) => awsEncodeURIComponent(s, true))
+    .map((s) => awsEncodeURIComponent(decodeSegment(s)))
     .join("/");
+}
+
+function decodeSegment(s: string): string {
+  // decodeURIComponent throws on malformed sequences; treat those as raw.
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 function canonicalizeQuery(params: URLSearchParams): string {
@@ -138,10 +153,14 @@ function canonicalizeQuery(params: URLSearchParams): string {
     .join("&");
 }
 
-function awsEncodeURIComponent(s: string, allowSlash = false): string {
-  return encodeURIComponent(s)
-    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
-    .replace(/%2F/g, allowSlash ? "/" : "%2F");
+function awsEncodeURIComponent(s: string): string {
+  // After decodeSegment() the input contains zero raw `/`, so we do not need
+  // the allowSlash branch. AWS variant: also encode !'()* which the default
+  // encodeURIComponent leaves untouched.
+  return encodeURIComponent(s).replace(
+    /[!'()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 function collapseWs(value: string): string {

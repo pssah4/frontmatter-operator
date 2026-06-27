@@ -442,43 +442,59 @@ async function listInferenceProfiles(
   region: string,
   credentials: AwsCreds,
 ): Promise<{ ok: true; list: FetchedModel[] } | { ok: false; error: string; list: FetchedModel[] }> {
-  const url = `https://bedrock.${region}.amazonaws.com/inference-profiles`;
-  const signed = await signSigV4({
-    method: "GET",
-    url,
-    region,
-    service: "bedrock",
-    credentials,
-  });
-  const resp = await requestUrl({
-    url: signed.url,
-    method: signed.method,
-    headers: signed.headers,
-    throw: false,
-  });
-  if (resp.status >= 300) {
-    return {
-      ok: false,
-      list: [],
-      error: `HTTP ${resp.status}: ${truncate(resp.text)}`,
+  const list: FetchedModel[] = [];
+  let nextToken: string | undefined;
+  // Pagination: follow nextToken until exhausted (AWS hard cap ~1000 per page).
+  // Filter to SYSTEM_DEFINED so application profiles do not pollute the
+  // discovery list -- the dropdown should only surface cross-region
+  // on-demand profiles the user can invoke directly.
+  for (let page = 0; page < 20; page++) {
+    const params = new URLSearchParams();
+    params.set("maxResults", "1000");
+    params.set("type", "SYSTEM_DEFINED");
+    if (nextToken) params.set("nextToken", nextToken);
+    const url = `https://bedrock.${region}.amazonaws.com/inference-profiles?${params.toString()}`;
+    const signed = await signSigV4({
+      method: "GET",
+      url,
+      region,
+      service: "bedrock",
+      credentials,
+    });
+    const resp = await requestUrl({
+      url: signed.url,
+      method: signed.method,
+      headers: signed.headers,
+      throw: false,
+    });
+    if (resp.status >= 300) {
+      return {
+        ok: false,
+        list: [],
+        error: `HTTP ${resp.status}: ${scrubAwsError(resp.text)}`,
+      };
+    }
+    const json = resp.json as {
+      inferenceProfileSummaries?: Array<{
+        inferenceProfileId?: string;
+        inferenceProfileName?: string;
+        type?: string;
+        status?: string;
+      }>;
+      nextToken?: string;
     };
+    for (const p of json.inferenceProfileSummaries ?? []) {
+      if ((p.status ?? "ACTIVE") !== "ACTIVE") continue;
+      if (!p.inferenceProfileId) continue;
+      list.push({
+        id: p.inferenceProfileId,
+        label: p.inferenceProfileName ?? p.inferenceProfileId,
+        group: groupForBedrockId(p.inferenceProfileId, "Inference profile"),
+      });
+    }
+    if (!json.nextToken) break;
+    nextToken = json.nextToken;
   }
-  const json = resp.json as {
-    inferenceProfileSummaries?: Array<{
-      inferenceProfileId?: string;
-      inferenceProfileName?: string;
-      type?: string;
-      status?: string;
-    }>;
-  };
-  const list: FetchedModel[] = (json.inferenceProfileSummaries ?? [])
-    .filter((p) => (p.status ?? "ACTIVE") === "ACTIVE")
-    .map((p) => ({
-      id: p.inferenceProfileId ?? "",
-      label: p.inferenceProfileName ?? p.inferenceProfileId ?? "",
-      group: groupForBedrockId(p.inferenceProfileId ?? "", "Inference profile"),
-    }))
-    .filter((p) => p.id.length > 0);
   return { ok: true, list };
 }
 
@@ -504,7 +520,7 @@ async function listFoundationModels(
     return {
       ok: false,
       list: [],
-      error: `HTTP ${resp.status}: ${truncate(resp.text)}`,
+      error: `HTTP ${resp.status}: ${scrubAwsError(resp.text)}`,
     };
   }
   const json = resp.json as {
@@ -518,6 +534,10 @@ async function listFoundationModels(
   };
   const list: FetchedModel[] = (json.modelSummaries ?? [])
     .filter((m) => (m.outputModalities ?? ["TEXT"]).includes("TEXT"))
+    // Only ON_DEMAND models can be invoked directly via InvokeModel.
+    // INFERENCE_PROFILE-only models already surface via listInferenceProfiles
+    // and would fail with "must use an inference profile" when called raw.
+    .filter((m) => (m.inferenceTypesSupported ?? ["ON_DEMAND"]).includes("ON_DEMAND"))
     .map((m) => ({
       id: m.modelId ?? "",
       label: m.modelName ?? m.modelId ?? "",
@@ -534,6 +554,46 @@ function groupForBedrockId(id: string, fallback: string): string {
   if (id.includes("mistral")) return "Mistral";
   if (id.includes("cohere")) return "Cohere";
   return fallback;
+}
+
+/**
+ * Strip AWS-side leak vectors from error bodies before they bubble into
+ * Notices / console logs. AWS SignatureDoesNotMatch responses include the
+ * full canonical request (which contains accessKeyId, signed-headers
+ * structure and timestamp). IncompleteSignature messages include the
+ * Authorization header verbatim. None of that belongs in a user-facing
+ * error string.
+ */
+export function scrubAwsError(text: string): string {
+  if (!text) return "";
+  let scrubbed = text
+    .replace(/Credential=[^,\s]+/g, "Credential=<redacted>")
+    .replace(/Signature=[a-f0-9]+/gi, "Signature=<redacted>")
+    .replace(/x-amz-security-token:[^\n]+/gi, "x-amz-security-token:<redacted>")
+    .replace(/AKIA[A-Z0-9]{16}/g, "AKIA<redacted>")
+    .replace(/ASIA[A-Z0-9]{16}/g, "ASIA<redacted>");
+  // Try to parse and surface only AWS error envelope short fields.
+  try {
+    const json = JSON.parse(scrubbed) as {
+      __type?: string;
+      message?: string;
+      Message?: string;
+    };
+    if (json.__type || json.message || json.Message) {
+      const code = json.__type ?? "AwsError";
+      const msg = json.message ?? json.Message ?? "";
+      return `${code}${msg ? ": " + msg.slice(0, 200) : ""}`;
+    }
+  } catch {
+    /* not JSON -- fall through */
+  }
+  // XML envelope -- pick Code + first Message.
+  const codeMatch = scrubbed.match(/<Code>([^<]+)<\/Code>/);
+  const msgMatch = scrubbed.match(/<Message>([^<]+)<\/Message>/);
+  if (codeMatch) {
+    return `${codeMatch[1]}${msgMatch ? ": " + msgMatch[1].slice(0, 200) : ""}`;
+  }
+  return scrubbed.length > 280 ? scrubbed.slice(0, 280) + "..." : scrubbed;
 }
 
 // ---------------------------------------------------------------- helpers

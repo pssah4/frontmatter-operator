@@ -7,6 +7,7 @@ import type {
 import { ProviderError, recommendedMaxTokens } from "../../types/llm";
 import type { ApiHandler } from "../types";
 import { signSigV4 } from "../../auth/AwsSigV4";
+import { scrubAwsError } from "../fetchModels";
 
 /**
  * Amazon Bedrock. Three auth modes:
@@ -36,7 +37,13 @@ export class BedrockProvider implements ApiHandler {
     const region = this.model.awsRegion ?? "eu-central-1";
     const baseUrl = `https://bedrock-runtime.${region}.amazonaws.com`;
     const profile = this.model.name; // e.g. "eu.anthropic.claude-opus-4-6-v1"
-    const url = `${baseUrl}/model/${encodeURIComponent(profile)}/invoke`;
+    // Note: we deliberately do NOT encodeURIComponent here. The SigV4 signer
+    // canonicalizes the path itself; if we pre-encoded, the path arrives at
+    // the signer already percent-escaped (URL.pathname preserves it), and
+    // the canonical-vs-wire mismatch produces SignatureDoesNotMatch. The
+    // canonicalizer is idempotent and the wire request will carry the
+    // correctly-encoded form regardless.
+    const url = `${baseUrl}/model/${profile}/invoke`;
 
     const isAnthropic = /anthropic\.claude/i.test(profile);
     if (!isAnthropic) {
@@ -146,7 +153,7 @@ function parseAnthropicResponse(
 ): CompletionResult {
   if (response.status < 200 || response.status >= 300) {
     throw new ProviderError(
-      `${providerType} ${response.status}: ${shortError(response.json ?? response.text)}`,
+      `${providerType} ${response.status}: ${scrubAwsError(response.text)}`,
       "bedrock",
       response.status,
     );

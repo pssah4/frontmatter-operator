@@ -101,6 +101,37 @@ describe("AwsSigV4", () => {
     );
   });
 
+  it("canonicalizes a path with a raw ':' to %3A (idempotent decode-then-encode)", async () => {
+    // Profile id contains a ':' (e.g. "anthropic.claude-3-5-sonnet-20240620-v1:0").
+    // We pass it raw in the URL and expect the canonical path to single-encode it.
+    const signedRaw = await signSigV4({
+      method: "POST",
+      url: "https://bedrock-runtime.eu-central-1.amazonaws.com/model/anthropic.claude-3-5-sonnet-20240620-v1:0/invoke",
+      region: "eu-central-1",
+      service: "bedrock",
+      body: "{}",
+      now: new Date(Date.UTC(2026, 5, 27, 10, 0, 0)),
+      credentials: { accessKeyId: "AKIA", secretAccessKey: "secret" },
+    });
+    // Also sign the pre-encoded variant -- must produce the SAME signature.
+    const signedEncoded = await signSigV4({
+      method: "POST",
+      url: "https://bedrock-runtime.eu-central-1.amazonaws.com/model/anthropic.claude-3-5-sonnet-20240620-v1%3A0/invoke",
+      region: "eu-central-1",
+      service: "bedrock",
+      body: "{}",
+      now: new Date(Date.UTC(2026, 5, 27, 10, 0, 0)),
+      credentials: { accessKeyId: "AKIA", secretAccessKey: "secret" },
+    });
+    const sigRaw = (signedRaw.headers["Authorization"] as string).match(
+      /Signature=([a-f0-9]+)/,
+    )![1];
+    const sigEnc = (signedEncoded.headers["Authorization"] as string).match(
+      /Signature=([a-f0-9]+)/,
+    )![1];
+    expect(sigRaw).toBe(sigEnc); // idempotent across pre-encoded inputs
+  });
+
   it("produces stable signatures (regression check)", async () => {
     // The exact signature depends on every byte of the canonical request,
     // including the headers we add. This regression test pins the signature
