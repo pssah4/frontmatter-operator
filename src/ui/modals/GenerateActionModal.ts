@@ -1,21 +1,11 @@
-import { App, Modal, Notice, Setting, TFile, setIcon } from "obsidian";
+import { App, Modal, Notice, TFile, setIcon } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import type { NoteRow } from "../../types";
-import type {
-  CustomPromptTemplate,
-  GeneratorParserId,
-  GeneratorPreset,
-} from "../../types/generators";
-import { emptyCustomPrompt } from "../../types/generators";
+import type { CustomPromptTemplate, GeneratorParserId, GeneratorPreset } from "../../types/generators";
 import {
   MODEL_SUGGESTIONS,
   PROVIDER_LABELS,
   type ProviderConfig,
-  type RunModelOptions,
-  getMaxTemperature,
-  isTemperatureFixed,
-  recommendedMaxTokens,
-  supportsThinking,
 } from "../../types/llm";
 
 type NoteScope = "matched" | "selected" | "active-note";
@@ -29,27 +19,25 @@ export interface GenerateModalOptions {
 }
 
 /**
- * AI chat / generator modal. Picks provider + model + decode parameters per
- * run, plus the prompt (built-in / custom / live edit) and the notes scope.
+ * Minimal chat-style generator. Three inputs only:
+ *   1. NOTES SCOPE  -- which notes the action runs on
+ *   2. PROMPT       -- pick a preset or type free-form (chat-window UX)
+ *   3. MODEL        -- which provider + model
  *
- * Everything that's per-run lives here. Provider _accounts_ (auth) live in
- * settings.providers[]; the AI chat picks one of them and a concrete model
- * from its discovery cache.
+ * Decode parameters and output-format pickers live elsewhere (preset
+ * defaults). Save-as-custom is a small button in the prompt toolbar.
  */
 export class GenerateActionModal extends Modal {
   private opts: GenerateModalOptions;
-  private selectedPromptId: string;
-  private liveSystemPrompt: string;
-  private liveUserPrompt: string;
-  private liveParser: GeneratorParserId = "single_line_text";
-  private selectedProviderId: string | null = null;
-  private selectedModelId = "";
-  private decode: RunModelOptions = { modelId: "" };
   private noteScope: NoteScope;
-  private skipIfPropertyExists = false;
+  private promptText: string;
+  private selectedPresetId: string | null = null;
+  private parser: GeneratorParserId = "single_line_text";
+  private systemPrompt: string;
+  private selectedProviderModel: string;
   private statusEl: HTMLElement | null = null;
-  private runBtn: HTMLButtonElement | null = null;
-  private showAdvanced = false;
+  private promptInputEl: HTMLTextAreaElement | null = null;
+  private chatLogEl: HTMLElement | null = null;
   private onDone: () => void;
 
   constructor(
@@ -62,73 +50,46 @@ export class GenerateActionModal extends Modal {
     this.opts = opts;
     this.onDone = onDone;
 
+    // Default scope: if user has ticked rows use those, else matched, else active note.
     if (opts.initialScope) this.noteScope = opts.initialScope;
     else if (opts.tickedRows.length > 0) this.noteScope = "selected";
     else if (opts.matchedRows.length > 0) this.noteScope = "matched";
     else this.noteScope = "active-note";
 
+    // Default prompt: first matching built-in preset for this property.
     const builtIn = plugin.settings.presets.find(
       (p) => p.targetProperty === opts.targetProperty,
     );
-    const custom = plugin.settings.customPrompts.find(
-      (p) => p.targetProperty === opts.targetProperty,
-    );
     if (builtIn) {
-      this.selectedPromptId = `built:${builtIn.id}`;
+      this.selectedPresetId = `built:${builtIn.id}`;
       const lang = plugin.settings.generatorLanguage;
-      this.liveSystemPrompt = builtIn.prompts[lang].systemPrompt;
-      this.liveUserPrompt = builtIn.prompts[lang].userPrompt;
-      this.liveParser = builtIn.parser;
-    } else if (custom) {
-      this.selectedPromptId = `custom:${custom.id}`;
-      this.liveSystemPrompt = custom.systemPrompt;
-      this.liveUserPrompt = custom.userPrompt;
-      this.liveParser = custom.parser;
+      this.promptText = builtIn.prompts[lang].userPrompt;
+      this.systemPrompt = builtIn.prompts[lang].systemPrompt;
+      this.parser = builtIn.parser;
     } else {
-      this.selectedPromptId = "live";
-      this.liveSystemPrompt = defaultSystemPrompt();
-      this.liveUserPrompt = defaultUserPrompt(opts.targetProperty);
+      this.promptText = `Generate a concise value for the "${opts.targetProperty}" frontmatter property based on the note content.\n\nNote content:\n{{NOTE_BODY}}`;
+      this.systemPrompt = `Return ONLY the value, no YAML keys, no explanations.`;
     }
 
-    // Pick default provider + model.
-    const enabledProviders = plugin.settings.providers.filter((p) => p.enabled);
-    this.selectedProviderId =
-      plugin.settings.defaultProviderId &&
-      enabledProviders.some((p) => p.id === plugin.settings.defaultProviderId)
-        ? plugin.settings.defaultProviderId
-        : (enabledProviders[0]?.id ?? null);
-    this.initModelForProvider();
+    // Pre-select default provider+model (last-used per provider sticky).
+    this.selectedProviderModel = this.firstAvailableProviderModel();
   }
 
-  private getSelectedProvider(): ProviderConfig | null {
-    return (
-      this.plugin.settings.providers.find((p) => p.id === this.selectedProviderId) ??
-      null
-    );
-  }
-
-  /** When the selected provider changes, pick a model from the cached list
-   *  or fall back to the last used / static suggestion / blank. */
-  private initModelForProvider(): void {
-    const provider = this.getSelectedProvider();
-    if (!provider) {
-      this.selectedModelId = "";
-      return;
-    }
-    const last = this.plugin.settings.lastUsedModelByProvider[provider.id];
-    const cached = provider.discoveredModels ?? [];
-    const candidates = cached.length > 0
-      ? cached.map((m) => m.id)
-      : (MODEL_SUGGESTIONS[provider.type] ?? []).map((s) => s.id);
-    const fallback = last ?? candidates[0] ?? "";
-    this.selectedModelId = fallback;
-    this.decode = { modelId: fallback };
+  private firstAvailableProviderModel(): string {
+    const def = this.plugin.settings.defaultProviderId;
+    const enabled = this.plugin.settings.providers.filter((p) => p.enabled);
+    if (enabled.length === 0) return "";
+    const provider = enabled.find((p) => p.id === def) ?? enabled[0];
+    const lastModel = this.plugin.settings.lastUsedModelByProvider[provider.id];
+    const fallback = pickAnyModel(provider);
+    return encode(provider.id, lastModel || fallback);
   }
 
   onOpen(): void {
     const { contentEl, titleEl } = this;
     contentEl.empty();
     contentEl.addClass("fm-editor-modal-content");
+    contentEl.addClass("fm-editor-chat-modal");
     titleEl.setText(`Generate with AI -> ${this.opts.targetProperty}`);
 
     const enabledProviders = this.plugin.settings.providers.filter((p) => p.enabled);
@@ -137,159 +98,114 @@ export class GenerateActionModal extends Modal {
       return;
     }
 
-    const targets = this.computeTargets();
-    const banner = contentEl.createDiv({ cls: "fm-editor-modal-target" });
-    banner.createSpan({ cls: "fm-editor-modal-target-label", text: "Target" });
-    banner.createSpan({
-      cls: "fm-editor-modal-target-count",
-      text: `${targets.length} ${targets.length === 1 ? "note" : "notes"} -> \`${this.opts.targetProperty}\``,
-    });
-
-    // Prompt
-    new Setting(contentEl)
-      .setName("Prompt")
-      .setDesc("Pick a built-in preset, a saved custom prompt, or live-edit below.")
-      .addDropdown((d) => {
-        const builtIns = this.plugin.settings.presets.filter(
-          (p) => p.targetProperty === this.opts.targetProperty,
-        );
-        const customs = this.plugin.settings.customPrompts.filter(
-          (p) => p.targetProperty === this.opts.targetProperty,
-        );
-        for (const p of builtIns) d.addOption(`built:${p.id}`, `Default: ${p.displayName}`);
-        for (const p of customs) d.addOption(`custom:${p.id}`, `Custom: ${p.name}`);
-        d.addOption("live", "Live edit (not saved)");
-        d.setValue(this.selectedPromptId);
-        d.onChange((v) => {
-          this.selectedPromptId = v;
-          this.applyPromptChoice();
-          this.onOpen();
-        });
-      });
-
-    const sysSetting = new Setting(contentEl)
-      .setName("System prompt")
-      .setDesc("Guardrail. Tells the model the expected output format.");
-    sysSetting.controlEl.style.display = "block";
-    sysSetting.controlEl.style.width = "100%";
-    const sysTa = sysSetting.controlEl.createEl("textarea", {
-      cls: "fm-editor-generator-textarea",
-      text: this.liveSystemPrompt,
-    });
-    sysTa.rows = 5;
-    sysTa.addEventListener("input", () => {
-      this.liveSystemPrompt = sysTa.value;
-    });
-
-    const userSetting = new Setting(contentEl)
-      .setName("User prompt")
-      .setDesc("Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}.");
-    userSetting.controlEl.style.display = "block";
-    userSetting.controlEl.style.width = "100%";
-    const userTa = userSetting.controlEl.createEl("textarea", {
-      cls: "fm-editor-generator-textarea",
-      text: this.liveUserPrompt,
-    });
-    userTa.rows = 9;
-    userTa.addEventListener("input", () => {
-      this.liveUserPrompt = userTa.value;
-    });
-
-    new Setting(contentEl)
-      .setName("Output format")
-      .setDesc("Deterministic parser used on the response.")
-      .addDropdown((d) => {
-        d.addOption("single_line_text", "Single-line text");
-        d.addOption("list_string", "List of strings");
-        d.addOption("moc_topics_concepts", "MoC: topics + concepts");
-        d.setValue(this.liveParser);
-        d.onChange((v) => {
-          this.liveParser = v as GeneratorParserId;
-        });
-      });
-
-    new Setting(contentEl)
-      .setName("Save as custom prompt")
-      .setDesc(`Save the current prompt for \`${this.opts.targetProperty}\`.`)
-      .addButton((b) => {
-        b.setButtonText("Save").onClick(async () => {
-          const name = window.prompt(
-            "Name this custom prompt",
-            `Custom for ${this.opts.targetProperty}`,
-          );
-          if (!name) return;
-          const tpl: CustomPromptTemplate = emptyCustomPrompt(
-            this.opts.targetProperty,
-          );
-          tpl.name = name;
-          tpl.systemPrompt = this.liveSystemPrompt;
-          tpl.userPrompt = this.liveUserPrompt;
-          tpl.parser = this.liveParser;
-          this.plugin.settings.customPrompts.push(tpl);
-          await this.plugin.saveSettings();
-          this.selectedPromptId = `custom:${tpl.id}`;
-          new Notice(`Saved "${name}".`);
-          this.onOpen();
-        });
-      });
-
-    // Provider + Model
-    new Setting(contentEl)
-      .setName("Provider")
-      .addDropdown((d) => {
-        for (const p of enabledProviders) {
-          d.addOption(p.id, `${p.displayName}  ·  ${PROVIDER_LABELS[p.type]}`);
-        }
-        if (this.selectedProviderId) d.setValue(this.selectedProviderId);
-        d.onChange((v) => {
-          this.selectedProviderId = v;
-          this.initModelForProvider();
-          this.onOpen();
-        });
-      });
-
-    this.renderModelRow(contentEl);
+    // ============== TOOLBAR (3 inputs in one compact row) ==============
+    const toolbar = contentEl.createDiv({ cls: "fm-editor-chat-toolbar" });
 
     // Notes scope
-    new Setting(contentEl)
-      .setName("Notes scope")
-      .addDropdown((d) => {
-        const active = this.opts.activeFile ?? this.app.workspace.getActiveFile();
-        if (active) d.addOption("active-note", `Active note (${active.basename})`);
-        d.addOption("matched", `Matched notes (${this.opts.matchedRows.length})`);
-        if (this.opts.tickedRows.length > 0) {
-          d.addOption("selected", `Selected only (${this.opts.tickedRows.length})`);
-        }
-        d.setValue(this.noteScope);
-        d.onChange((v) => {
-          this.noteScope = v as NoteScope;
-          this.onOpen();
-        });
+    const scopeWrap = toolbar.createDiv({ cls: "fm-editor-chat-tool" });
+    setIcon(scopeWrap.createSpan({ cls: "fm-editor-chat-tool-icon" }), "files");
+    const scopeSelect = scopeWrap.createEl("select");
+    const active = this.opts.activeFile ?? this.app.workspace.getActiveFile();
+    if (active) {
+      scopeSelect.createEl("option", {
+        value: "active-note",
+        text: `Active note (${active.basename})`,
       });
-
-    new Setting(contentEl)
-      .setName("Skip notes that already have the target property")
-      .addToggle((t) => {
-        t.setValue(this.skipIfPropertyExists).onChange((v) => {
-          this.skipIfPropertyExists = v;
-        });
+    }
+    scopeSelect.createEl("option", {
+      value: "matched",
+      text: `Filter matches (${this.opts.matchedRows.length})`,
+    });
+    if (this.opts.tickedRows.length > 0) {
+      scopeSelect.createEl("option", {
+        value: "selected",
+        text: `Selected only (${this.opts.tickedRows.length})`,
       });
+    }
+    scopeSelect.value = this.noteScope;
+    scopeSelect.addEventListener("change", () => {
+      this.noteScope = scopeSelect.value as NoteScope;
+    });
 
-    // Advanced toggle
-    new Setting(contentEl)
-      .setName("Advanced decode parameters")
-      .setDesc("Override max tokens, temperature, thinking budget for this run.")
-      .addToggle((t) => {
-        t.setValue(this.showAdvanced).onChange((v) => {
-          this.showAdvanced = v;
-          this.onOpen();
+    // Prompt preset picker
+    const presetWrap = toolbar.createDiv({ cls: "fm-editor-chat-tool" });
+    setIcon(presetWrap.createSpan({ cls: "fm-editor-chat-tool-icon" }), "message-square");
+    const presetSelect = presetWrap.createEl("select");
+    const builtIns = this.plugin.settings.presets.filter(
+      (p) => p.targetProperty === this.opts.targetProperty,
+    );
+    const customs = this.plugin.settings.customPrompts.filter(
+      (p) => p.targetProperty === this.opts.targetProperty,
+    );
+    for (const p of builtIns) presetSelect.createEl("option", { value: `built:${p.id}`, text: `Preset: ${p.displayName}` });
+    for (const p of customs) presetSelect.createEl("option", { value: `custom:${p.id}`, text: `Custom: ${p.name}` });
+    presetSelect.createEl("option", { value: "live", text: "Custom prompt" });
+    if (this.selectedPresetId) presetSelect.value = this.selectedPresetId;
+    presetSelect.addEventListener("change", () => {
+      this.selectedPresetId = presetSelect.value;
+      this.applyPromptChoice();
+      if (this.promptInputEl) this.promptInputEl.value = this.promptText;
+    });
+
+    // Model picker
+    const modelWrap = toolbar.createDiv({ cls: "fm-editor-chat-tool" });
+    setIcon(modelWrap.createSpan({ cls: "fm-editor-chat-tool-icon" }), "cpu");
+    const modelSelect = modelWrap.createEl("select");
+    for (const p of enabledProviders) {
+      const cached = p.discoveredModels ?? [];
+      const statics = MODEL_SUGGESTIONS[p.type] ?? [];
+      const items =
+        cached.length > 0
+          ? cached.map((c) => ({ id: c.id, label: c.label }))
+          : statics.map((s) => ({ id: s.id, label: s.label }));
+      if (items.length === 0) continue;
+      const og = modelSelect.createEl("optgroup");
+      og.label = `${p.displayName} · ${PROVIDER_LABELS[p.type]}`;
+      for (const it of items) {
+        og.createEl("option", {
+          value: encode(p.id, it.id),
+          text: it.label,
         });
-      });
-    if (this.showAdvanced) this.renderAdvancedRows(contentEl);
+      }
+    }
+    if (this.selectedProviderModel) modelSelect.value = this.selectedProviderModel;
+    modelSelect.addEventListener("change", () => {
+      this.selectedProviderModel = modelSelect.value;
+    });
 
-    this.statusEl = contentEl.createDiv({ cls: "fm-editor-modal-status" });
+    // ============== CHAT WINDOW ==============
+    this.chatLogEl = contentEl.createDiv({ cls: "fm-editor-chat-log" });
+    this.renderInfoBubble();
 
+    // ============== INPUT ==============
+    const inputWrap = contentEl.createDiv({ cls: "fm-editor-chat-input-wrap" });
+    const input = inputWrap.createEl("textarea", {
+      cls: "fm-editor-chat-input",
+      placeholder: "Type your prompt. Use {{NOTE_BODY}} / {{NOTE_TITLE}} / {{KNOWN_TOPICS}} / {{KNOWN_CONCEPTS}} as variables.",
+    });
+    input.value = this.promptText;
+    input.rows = 4;
+    input.addEventListener("input", () => {
+      this.promptText = input.value;
+    });
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        void this.runGeneration();
+      }
+    });
+    this.promptInputEl = input;
+
+    // ============== FOOTER ==============
     const footer = contentEl.createDiv({ cls: "fm-editor-modal-footer" });
+    const left = footer.createDiv({ cls: "fm-editor-modal-footer-left" });
+    const save = left.createEl("button", { cls: "fm-editor-btn" });
+    setIcon(save.createSpan(), "bookmark-plus");
+    save.createSpan({ text: "Save as preset" });
+    save.addEventListener("click", () => this.saveAsCustomPrompt());
+
+    this.statusEl = left.createDiv({ cls: "fm-editor-modal-status" });
+
     const right = footer.createDiv({ cls: "fm-editor-modal-footer-right" });
     const cancel = right.createEl("button", { cls: "fm-editor-btn", text: "Cancel" });
     cancel.addEventListener("click", () => this.close());
@@ -297,134 +213,78 @@ export class GenerateActionModal extends Modal {
     setIcon(run.createSpan(), "sparkles");
     run.createSpan({ text: "Generate" });
     run.addEventListener("click", () => this.runGeneration());
-    this.runBtn = run;
   }
 
-  private renderModelRow(parent: HTMLElement): void {
-    const provider = this.getSelectedProvider();
-    if (!provider) return;
-    const cached = provider.discoveredModels ?? [];
-    const staticSuggestions = MODEL_SUGGESTIONS[provider.type] ?? [];
-    const setting = new Setting(parent)
-      .setName("Model")
-      .setDesc(
-        cached.length > 0
-          ? `${cached.length} models cached. Edit provider in Settings to refresh.`
-          : "No cached models. Either refresh discovery in provider settings, pick from the suggestions list, or type a model id manually.",
-      );
-    const select = setting.controlEl.createEl("select");
-    select.createEl("option", { value: "", text: "(custom)" });
-    const items =
-      cached.length > 0
-        ? cached.map((c) => ({ id: c.id, label: c.label, group: c.group ?? "Available" }))
-        : staticSuggestions;
-    const groups = new Map<string, typeof items>();
-    for (const it of items) {
-      const list = groups.get(it.group ?? "Available") ?? [];
-      list.push(it);
-      groups.set(it.group ?? "Available", list);
-    }
-    for (const [g, list] of groups) {
-      const og = select.createEl("optgroup");
-      og.label = g;
-      for (const it of list) {
-        const opt = og.createEl("option", { value: it.id, text: it.label });
-        if (it.id === this.selectedModelId) opt.selected = true;
-      }
-    }
-    select.addEventListener("change", () => {
-      if (select.value) {
-        this.selectedModelId = select.value;
-        this.decode = { ...this.decode, modelId: select.value };
-      }
+  private renderInfoBubble(): void {
+    if (!this.chatLogEl) return;
+    this.chatLogEl.empty();
+    const targets = this.computeTargets();
+    const bubble = this.chatLogEl.createDiv({ cls: "fm-editor-chat-bubble fm-editor-chat-bubble-system" });
+    bubble.createDiv({
+      cls: "fm-editor-chat-bubble-label",
+      text: "Plan",
     });
-    setting.addText((t) => {
-      t.setPlaceholder("or paste a model id")
-        .setValue(this.selectedModelId)
-        .onChange((v) => {
-          this.selectedModelId = v;
-          this.decode = { ...this.decode, modelId: v };
-        });
+    bubble.createDiv({
+      cls: "fm-editor-chat-bubble-text",
+      text: `Generate "${this.opts.targetProperty}" for ${targets.length} ${targets.length === 1 ? "note" : "notes"} with the prompt below.`,
     });
   }
 
-  private renderAdvancedRows(parent: HTMLElement): void {
-    const provider = this.getSelectedProvider();
-    if (!provider) return;
-    const modelId = this.decode.modelId || this.selectedModelId;
-
-    new Setting(parent)
-      .setName("Max output tokens")
-      .setDesc(`Default: auto (~${recommendedMaxTokens(modelId)} based on model).`)
-      .addText((t) => {
-        t.setPlaceholder("auto")
-          .setValue(this.decode.maxTokens?.toString() ?? "")
-          .onChange((v) => {
-            const n = parseInt(v, 10);
-            this.decode.maxTokens = Number.isFinite(n) ? n : undefined;
-          });
-      });
-
-    if (!isTemperatureFixed(provider.type, modelId)) {
-      new Setting(parent)
-        .setName(`Temperature (0 - ${getMaxTemperature(provider.type)})`)
-        .setDesc("Empty = model default (0).")
-        .addText((t) => {
-          t.setPlaceholder("0")
-            .setValue(this.decode.temperature?.toString() ?? "")
-            .onChange((v) => {
-              const n = parseFloat(v);
-              this.decode.temperature = Number.isFinite(n) ? n : undefined;
-            });
-        });
-    }
-
-    if (supportsThinking(provider.type, modelId)) {
-      new Setting(parent)
-        .setName("Extended thinking")
-        .addToggle((t) => {
-          t.setValue(!!this.decode.thinkingEnabled).onChange((v) => {
-            this.decode.thinkingEnabled = v;
-            if (v && this.decode.thinkingBudgetTokens === undefined) {
-              this.decode.thinkingBudgetTokens = 10_000;
-            }
-            this.onOpen();
-          });
-        });
-      if (this.decode.thinkingEnabled) {
-        new Setting(parent)
-          .setName("Thinking budget (tokens)")
-          .addText((t) => {
-            t.setPlaceholder("10000")
-              .setValue(this.decode.thinkingBudgetTokens?.toString() ?? "10000")
-              .onChange((v) => {
-                const n = parseInt(v, 10);
-                this.decode.thinkingBudgetTokens = Number.isFinite(n) ? n : 10_000;
-              });
-          });
-      }
-    }
+  private appendChat(role: "user" | "assistant", text: string): void {
+    if (!this.chatLogEl) return;
+    const bubble = this.chatLogEl.createDiv({
+      cls: `fm-editor-chat-bubble fm-editor-chat-bubble-${role}`,
+    });
+    bubble.createDiv({
+      cls: "fm-editor-chat-bubble-label",
+      text: role === "user" ? "You" : "Assistant",
+    });
+    bubble.createDiv({
+      cls: "fm-editor-chat-bubble-text",
+      text,
+    });
+    this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
   }
 
   private applyPromptChoice(): void {
-    if (this.selectedPromptId.startsWith("built:")) {
-      const id = this.selectedPromptId.slice("built:".length);
+    if (!this.selectedPresetId) return;
+    if (this.selectedPresetId.startsWith("built:")) {
+      const id = this.selectedPresetId.slice("built:".length);
       const preset = this.plugin.settings.presets.find((p) => p.id === id);
       if (preset) {
         const lang = this.plugin.settings.generatorLanguage;
-        this.liveSystemPrompt = preset.prompts[lang].systemPrompt;
-        this.liveUserPrompt = preset.prompts[lang].userPrompt;
-        this.liveParser = preset.parser;
+        this.promptText = preset.prompts[lang].userPrompt;
+        this.systemPrompt = preset.prompts[lang].systemPrompt;
+        this.parser = preset.parser;
       }
-    } else if (this.selectedPromptId.startsWith("custom:")) {
-      const id = this.selectedPromptId.slice("custom:".length);
+    } else if (this.selectedPresetId.startsWith("custom:")) {
+      const id = this.selectedPresetId.slice("custom:".length);
       const tpl = this.plugin.settings.customPrompts.find((p) => p.id === id);
       if (tpl) {
-        this.liveSystemPrompt = tpl.systemPrompt;
-        this.liveUserPrompt = tpl.userPrompt;
-        this.liveParser = tpl.parser;
+        this.promptText = tpl.userPrompt;
+        this.systemPrompt = tpl.systemPrompt;
+        this.parser = tpl.parser;
       }
     }
+  }
+
+  private async saveAsCustomPrompt(): Promise<void> {
+    const name = window.prompt(
+      "Name this preset",
+      `My ${this.opts.targetProperty}`,
+    );
+    if (!name) return;
+    const { emptyCustomPrompt } = await import("../../types/generators");
+    const tpl: CustomPromptTemplate = emptyCustomPrompt(this.opts.targetProperty);
+    tpl.name = name;
+    tpl.systemPrompt = this.systemPrompt;
+    tpl.userPrompt = this.promptText;
+    tpl.parser = this.parser;
+    this.plugin.settings.customPrompts.push(tpl);
+    await this.plugin.saveSettings();
+    new Notice(`Saved "${name}".`);
+    this.selectedPresetId = `custom:${tpl.id}`;
+    this.onOpen();
   }
 
   private renderEmptyState(parent: HTMLElement): void {
@@ -468,13 +328,14 @@ export class GenerateActionModal extends Modal {
   }
 
   private async runGeneration(): Promise<void> {
-    const provider = this.getSelectedProvider();
-    if (!provider) {
-      new Notice("Pick a provider");
+    const decoded = decode(this.selectedProviderModel);
+    if (!decoded) {
+      new Notice("Pick a model");
       return;
     }
-    if (!this.selectedModelId) {
-      new Notice("Pick a model");
+    const provider = this.plugin.settings.providers.find((p) => p.id === decoded.providerId);
+    if (!provider) {
+      new Notice("Provider not found");
       return;
     }
     const targets = this.computeTargets();
@@ -482,29 +343,31 @@ export class GenerateActionModal extends Modal {
       new Notice("No notes in the chosen scope.");
       return;
     }
-    if (this.runBtn) this.runBtn.setAttribute("disabled", "true");
 
     // Persist last-used model per provider.
-    this.plugin.settings.lastUsedModelByProvider[provider.id] = this.selectedModelId;
+    this.plugin.settings.lastUsedModelByProvider[provider.id] = decoded.modelId;
     await this.plugin.saveSettings();
 
+    this.appendChat("user", this.promptText);
+
+    // Build an ad-hoc preset for this run.
     const adhoc: GeneratorPreset = {
       id: "adhoc",
       displayName: "Ad-hoc",
       targetProperty: this.opts.targetProperty,
       description: "",
-      parser: this.liveParser,
+      parser: this.parser,
       isBuiltIn: false,
       prompts: {
-        en: { systemPrompt: this.liveSystemPrompt, userPrompt: this.liveUserPrompt },
-        de: { systemPrompt: this.liveSystemPrompt, userPrompt: this.liveUserPrompt },
+        en: { systemPrompt: this.systemPrompt, userPrompt: this.promptText },
+        de: { systemPrompt: this.systemPrompt, userPrompt: this.promptText },
       },
     };
 
     const files: TFile[] = targets.map((r) => r.file);
     const knownTopics: string[] = [];
     const knownConcepts: string[] = [];
-    if (this.liveParser === "moc_topics_concepts") {
+    if (this.parser === "moc_topics_concepts") {
       const rows = this.plugin.scanner.buildAllRows();
       for (const r of rows) {
         const v = r.frontmatter[this.opts.targetProperty];
@@ -516,42 +379,41 @@ export class GenerateActionModal extends Modal {
       }
     }
 
-    this.setStatus(`0 / ${files.length} ...`);
+    this.setStatus(`Running 0 / ${files.length}...`);
     try {
       const result = await this.plugin.generator.run({
         preset: adhoc,
         provider,
-        model: { ...this.decode, modelId: this.selectedModelId },
+        model: { modelId: decoded.modelId },
         language: this.plugin.settings.generatorLanguage,
         targets: files,
-        skipIfPropertyExists: this.skipIfPropertyExists,
-        knownTopics: dedupCi(knownTopics),
-        knownConcepts: dedupCi(knownConcepts),
+        skipIfPropertyExists: false,
+        knownTopics,
+        knownConcepts,
         onProgress: (current, total, file) => {
           this.setStatus(`${current} / ${total}  ·  ${file.basename}`);
         },
       });
       const parts = [
         `${result.successCount} generated`,
-        `${result.skippedCount} skipped`,
+        result.skippedCount > 0 ? `${result.skippedCount} skipped` : null,
         result.errorCount > 0 ? `${result.errorCount} errors` : null,
       ].filter(Boolean);
+      this.appendChat("assistant", parts.join(", "));
+      this.setStatus("Done.");
       new Notice(`Generator: ${parts.join(", ")}`);
       if (result.errors.length > 0) {
         console.warn("frontmatter-editor: generator errors", result.errors);
+        for (const err of result.errors.slice(0, 5)) {
+          this.appendChat("assistant", `${err.path}: ${err.message}`);
+        }
       }
       this.onDone();
-      if (result.errorCount === 0) {
-        this.close();
-      } else {
-        this.setStatus("Done with errors. Check developer console.");
-        if (this.runBtn) this.runBtn.removeAttribute("disabled");
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      this.appendChat("assistant", `Failed: ${message}`);
+      this.setStatus(`Failed`);
       new Notice(`Generator failed: ${message}`);
-      this.setStatus(`Failed: ${message}`);
-      if (this.runBtn) this.runBtn.removeAttribute("disabled");
     }
   }
 
@@ -564,22 +426,23 @@ export class GenerateActionModal extends Modal {
   }
 }
 
-function dedupCi(items: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const i of items) {
-    const key = i.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(i);
+function pickAnyModel(provider: ProviderConfig): string {
+  if (provider.discoveredModels && provider.discoveredModels[0]) {
+    return provider.discoveredModels[0].id;
   }
-  return out;
+  const statics = MODEL_SUGGESTIONS[provider.type] ?? [];
+  return statics[0]?.id ?? "";
 }
 
-function defaultSystemPrompt(): string {
-  return `You write structured frontmatter content. Return ONLY the requested block in the exact format. The plugin parses your output deterministically; do not invent additional YAML or frontmatter keys.`;
+function encode(providerId: string, modelId: string): string {
+  return `${providerId}::${modelId}`;
 }
 
-function defaultUserPrompt(property: string): string {
-  return `Generate a concise value for the "${property}" frontmatter property of the active note, based on the note content.\n\nFollow the system prompt's format strictly.\n\nNote content:\n{{NOTE_BODY}}`;
+function decode(combined: string): { providerId: string; modelId: string } | null {
+  const idx = combined.indexOf("::");
+  if (idx < 0) return null;
+  return {
+    providerId: combined.slice(0, idx),
+    modelId: combined.slice(idx + 2),
+  };
 }

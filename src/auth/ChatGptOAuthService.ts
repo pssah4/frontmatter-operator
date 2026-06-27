@@ -93,6 +93,20 @@ export class ChatGptOAuthService {
     }
   }
 
+  getAccountId(): string {
+    return this.plugin.settings.chatgptOAuthAccountId ?? "";
+  }
+
+  /**
+   * Invalidate the access token (used after a 401 from the codex backend
+   * so the next request triggers a refresh). Refresh token stays.
+   */
+  invalidateAccessToken(): void {
+    this.plugin.settings.chatgptOAuthAccessToken = undefined;
+    this.plugin.settings.chatgptOAuthExpiresAt = 0;
+    void this.plugin.saveSettings();
+  }
+
   async signOut(): Promise<void> {
     this.plugin.settings.chatgptOAuthAccessToken = undefined;
     this.plugin.settings.chatgptOAuthRefreshToken = undefined;
