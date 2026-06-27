@@ -2,6 +2,7 @@ import { requestUrl } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
 import type { CustomModel, ProviderType } from "../types/llm";
 import { DEFAULT_BASE_URLS } from "../types/llm";
+import { signSigV4 } from "../auth/AwsSigV4";
 
 export interface FetchedModel {
   id: string;
@@ -46,12 +47,7 @@ export async function fetchModels(
       case "chatgpt-oauth":
         return await fetchChatGptOAuth(plugin);
       case "bedrock":
-        return {
-          ok: false,
-          models: [],
-          error:
-            "Bedrock model discovery requires the AWS SDK ListInferenceProfiles call (next phase). Use the Quick-pick suggestions or paste the profile id manually.",
-        };
+        return await fetchBedrock(draft);
       default:
         return { ok: false, models: [], error: "Unsupported provider" };
     }
@@ -379,6 +375,165 @@ async function fetchChatGptOAuth(
     }))
     .filter(isChatId);
   return { ok: true, models: models.sort(byGroupThenId) };
+}
+
+// ---------------------------------------------------------------- BEDROCK
+
+async function fetchBedrock(draft: CustomModel): Promise<FetchResult> {
+  if (!draft.awsAccessKey || !draft.awsSecretKey) {
+    return {
+      ok: false,
+      models: [],
+      error:
+        "Bedrock discovery needs an IAM access key (AWS Bedrock API Keys are runtime-only). Switch the AWS auth mode to 'IAM Access Key' and provide accessKey + secretKey.",
+    };
+  }
+  const region = draft.awsRegion ?? "eu-central-1";
+  const credentials = {
+    accessKeyId: draft.awsAccessKey,
+    secretAccessKey: draft.awsSecretKey,
+    sessionToken: draft.awsSessionToken,
+  };
+
+  // Run both list calls in parallel; combine into one display list.
+  const [profiles, foundation] = await Promise.all([
+    listInferenceProfiles(region, credentials).catch((err: Error) => ({
+      ok: false,
+      error: err.message,
+      list: [] as FetchedModel[],
+    })),
+    listFoundationModels(region, credentials).catch((err: Error) => ({
+      ok: false,
+      error: err.message,
+      list: [] as FetchedModel[],
+    })),
+  ]);
+
+  const merged: FetchedModel[] = [];
+  if ("list" in profiles) merged.push(...profiles.list);
+  if ("list" in foundation) merged.push(...foundation.list);
+  if (merged.length === 0) {
+    const errs: string[] = [];
+    if ("error" in profiles && profiles.error) errs.push(`profiles: ${profiles.error}`);
+    if ("error" in foundation && foundation.error) errs.push(`foundation: ${foundation.error}`);
+    return {
+      ok: false,
+      models: [],
+      error: errs.join(" · ") || "no models returned",
+    };
+  }
+  // dedup by id
+  const seen = new Set<string>();
+  const unique = merged.filter((m) => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
+  });
+  return { ok: true, models: unique.sort(byGroupThenId) };
+}
+
+interface AwsCreds {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+}
+
+async function listInferenceProfiles(
+  region: string,
+  credentials: AwsCreds,
+): Promise<{ ok: true; list: FetchedModel[] } | { ok: false; error: string; list: FetchedModel[] }> {
+  const url = `https://bedrock.${region}.amazonaws.com/inference-profiles`;
+  const signed = await signSigV4({
+    method: "GET",
+    url,
+    region,
+    service: "bedrock",
+    credentials,
+  });
+  const resp = await requestUrl({
+    url: signed.url,
+    method: signed.method,
+    headers: signed.headers,
+    throw: false,
+  });
+  if (resp.status >= 300) {
+    return {
+      ok: false,
+      list: [],
+      error: `HTTP ${resp.status}: ${truncate(resp.text)}`,
+    };
+  }
+  const json = resp.json as {
+    inferenceProfileSummaries?: Array<{
+      inferenceProfileId?: string;
+      inferenceProfileName?: string;
+      type?: string;
+      status?: string;
+    }>;
+  };
+  const list: FetchedModel[] = (json.inferenceProfileSummaries ?? [])
+    .filter((p) => (p.status ?? "ACTIVE") === "ACTIVE")
+    .map((p) => ({
+      id: p.inferenceProfileId ?? "",
+      label: p.inferenceProfileName ?? p.inferenceProfileId ?? "",
+      group: groupForBedrockId(p.inferenceProfileId ?? "", "Inference profile"),
+    }))
+    .filter((p) => p.id.length > 0);
+  return { ok: true, list };
+}
+
+async function listFoundationModels(
+  region: string,
+  credentials: AwsCreds,
+): Promise<{ ok: true; list: FetchedModel[] } | { ok: false; error: string; list: FetchedModel[] }> {
+  const url = `https://bedrock.${region}.amazonaws.com/foundation-models`;
+  const signed = await signSigV4({
+    method: "GET",
+    url,
+    region,
+    service: "bedrock",
+    credentials,
+  });
+  const resp = await requestUrl({
+    url: signed.url,
+    method: signed.method,
+    headers: signed.headers,
+    throw: false,
+  });
+  if (resp.status >= 300) {
+    return {
+      ok: false,
+      list: [],
+      error: `HTTP ${resp.status}: ${truncate(resp.text)}`,
+    };
+  }
+  const json = resp.json as {
+    modelSummaries?: Array<{
+      modelId?: string;
+      modelName?: string;
+      providerName?: string;
+      inferenceTypesSupported?: string[];
+      outputModalities?: string[];
+    }>;
+  };
+  const list: FetchedModel[] = (json.modelSummaries ?? [])
+    .filter((m) => (m.outputModalities ?? ["TEXT"]).includes("TEXT"))
+    .map((m) => ({
+      id: m.modelId ?? "",
+      label: m.modelName ?? m.modelId ?? "",
+      group: m.providerName ?? groupForBedrockId(m.modelId ?? "", "Foundation"),
+    }))
+    .filter((p) => p.id.length > 0);
+  return { ok: true, list };
+}
+
+function groupForBedrockId(id: string, fallback: string): string {
+  if (id.includes("anthropic")) return "Anthropic";
+  if (id.includes("amazon.nova") || id.includes("amazon.titan")) return "Amazon";
+  if (id.includes("meta.llama")) return "Meta";
+  if (id.includes("mistral")) return "Mistral";
+  if (id.includes("cohere")) return "Cohere";
+  return fallback;
 }
 
 // ---------------------------------------------------------------- helpers

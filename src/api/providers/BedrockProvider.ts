@@ -6,6 +6,7 @@ import type {
 } from "../../types/llm";
 import { ProviderError, recommendedMaxTokens } from "../../types/llm";
 import type { ApiHandler } from "../types";
+import { signSigV4 } from "../../auth/AwsSigV4";
 
 /**
  * Amazon Bedrock. Three auth modes:
@@ -17,10 +18,9 @@ import type { ApiHandler } from "../types";
  * - gateway: enterprise gateway in front of Bedrock with a static header.
  *   Same Anthropic Messages payload as native, plus the custom header.
  *
- * - access-key: AWS SigV4 with IAM access key. SigV4 is a 200-line port
- *   from the AWS SDK -- shipped here as a thin stub that throws "not yet
- *   implemented", since Phase 1 covers api-key + gateway only. The next
- *   wave will land the full SigV4 signer.
+ * - access-key: AWS SigV4 with IAM access key. Full SigV4 implementation in
+ *   src/auth/AwsSigV4.ts; we sign the InvokeModel POST against
+ *   bedrock-runtime in the configured region.
  *
  * Bedrock always speaks the Anthropic Messages format when the model id
  * is anthropic.claude-*; other model families (Nova, Llama) use the
@@ -82,10 +82,35 @@ export class BedrockProvider implements ApiHandler {
       }
       headers[this.model.gatewayHeaderName] = this.model.gatewayHeaderValue;
     } else {
-      throw new ProviderError(
-        "Bedrock access-key (SigV4) signing lands in the next phase. Use api-key or gateway for now.",
-        "bedrock",
-      );
+      // access-key mode -- sign the request with SigV4.
+      if (!this.model.awsAccessKey || !this.model.awsSecretKey) {
+        throw new ProviderError(
+          "Bedrock access-key mode requires awsAccessKey and awsSecretKey.",
+          "bedrock",
+        );
+      }
+      const bodyStr = JSON.stringify(body);
+      const signed = await signSigV4({
+        method: "POST",
+        url,
+        region,
+        service: "bedrock",
+        body: bodyStr,
+        extraHeaders: { ...headers },
+        credentials: {
+          accessKeyId: this.model.awsAccessKey,
+          secretAccessKey: this.model.awsSecretKey,
+          sessionToken: this.model.awsSessionToken,
+        },
+      });
+      const response = await requestUrl({
+        url: signed.url,
+        method: signed.method,
+        headers: signed.headers,
+        body: bodyStr,
+        throw: false,
+      });
+      return parseAnthropicResponse(response, this.model.name, this.providerType);
     }
 
     const request: RequestUrlParam = {
@@ -97,31 +122,7 @@ export class BedrockProvider implements ApiHandler {
     };
 
     const response = await requestUrl(request);
-    if (response.status < 200 || response.status >= 300) {
-      throw new ProviderError(
-        `Bedrock ${response.status}: ${shortError(response.json ?? response.text)}`,
-        "bedrock",
-        response.status,
-      );
-    }
-
-    const json = response.json as {
-      content?: Array<{ type: string; text?: string }>;
-      usage?: { input_tokens?: number; output_tokens?: number };
-      model?: string;
-    };
-    const text = (json.content ?? [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
-      .join("");
-    return {
-      text,
-      usage: {
-        inputTokens: json.usage?.input_tokens,
-        outputTokens: json.usage?.output_tokens,
-      },
-      model: json.model ?? this.model.name,
-    };
+    return parseAnthropicResponse(response, this.model.name, this.providerType);
   }
 
   async ping(): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
@@ -136,6 +137,37 @@ export class BedrockProvider implements ApiHandler {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
+}
+
+function parseAnthropicResponse(
+  response: { status: number; json: unknown; text: string },
+  fallbackModel: string,
+  providerType: string,
+): CompletionResult {
+  if (response.status < 200 || response.status >= 300) {
+    throw new ProviderError(
+      `${providerType} ${response.status}: ${shortError(response.json ?? response.text)}`,
+      "bedrock",
+      response.status,
+    );
+  }
+  const json = response.json as {
+    content?: Array<{ type: string; text?: string }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
+    model?: string;
+  };
+  const text = (json.content ?? [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text ?? "")
+    .join("");
+  return {
+    text,
+    usage: {
+      inputTokens: json.usage?.input_tokens,
+      outputTokens: json.usage?.output_tokens,
+    },
+    model: json.model ?? fallbackModel,
+  };
 }
 
 function shortError(payload: unknown): string {
