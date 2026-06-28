@@ -13,6 +13,7 @@ import {
   resolveTemplate,
   wrapAsWikilink,
 } from "./ValueCoercion";
+import { mapFmValue } from "./ValueMappingEngine";
 import type { SnapshotService } from "./SnapshotService";
 
 // HARD-04: deny these as frontmatter property keys to prevent silent
@@ -97,7 +98,8 @@ export function applyActionPure(
 
     case "rename":
     case "copy":
-    case "move": {
+    case "move":
+    case "transfer": {
       if (!isAllowedKey(action.toProperty)) {
         return {
           after,
@@ -112,7 +114,18 @@ export function applyActionPure(
         return { after, changed: false, skipped: "no source property present" };
       }
 
-      const collected = sourceProps.map((p) => after[p]);
+      let collected = sourceProps.map((p) => after[p]);
+
+      // Transfer-only: apply transforms + per-value mapping BEFORE the
+      // multi-source merge so that many-to-one collapses (e.g.
+      // "Person"+"Teilnehmer" -> "person","person") dedup naturally in
+      // the list-merge step that follows.
+      if (action.type === "transfer") {
+        collected = collected.map((v) =>
+          mapFmValue(v, action.transforms, action.valueMappings),
+        );
+      }
+
       let merged: FmValue =
         collected.length === 1
           ? collected[0]
@@ -138,7 +151,15 @@ export function applyActionPure(
 
       after[action.toProperty] = merged;
 
-      if (action.type !== "copy") {
+      // Source-delete rule: legacy 'rename'/'move' delete sources, legacy
+      // 'copy' keeps them, and the new 'transfer' is gated by an
+      // explicit deleteSource flag. Target-prop is preserved in any
+      // mode to avoid clobbering the just-written value.
+      const removeSources =
+        action.type === "transfer"
+          ? action.deleteSource
+          : action.type !== "copy";
+      if (removeSources) {
         for (const p of sourceProps) {
           if (p !== action.toProperty) delete after[p];
         }
@@ -147,6 +168,7 @@ export function applyActionPure(
     }
   }
 }
+
 
 export class BulkActionService {
   constructor(
@@ -322,13 +344,19 @@ export class BulkActionService {
         }
         case "rename":
         case "copy":
-        case "move": {
+        case "move":
+        case "transfer": {
           if (!isAllowedKey(action.toProperty)) return;
           const sourceProps = action.fromProperties
             .filter(isAllowedKey)
             .filter((p) => Object.prototype.hasOwnProperty.call(fm, p));
           if (sourceProps.length === 0) return;
-          const collected = sourceProps.map((p) => fm[p]);
+          let collected = sourceProps.map((p) => fm[p] as FmValue);
+          if (action.type === "transfer") {
+            collected = collected.map((v) =>
+              mapFmValue(v, action.transforms, action.valueMappings),
+            );
+          }
           let merged: FmValue =
             collected.length === 1
               ? (collected[0] as FmValue)
@@ -352,7 +380,11 @@ export class BulkActionService {
             }
           }
           fm[action.toProperty] = merged;
-          if (action.type !== "copy") {
+          const removeSources =
+            action.type === "transfer"
+              ? action.deleteSource
+              : action.type !== "copy";
+          if (removeSources) {
             for (const p of sourceProps) {
               if (p !== action.toProperty) delete fm[p];
             }

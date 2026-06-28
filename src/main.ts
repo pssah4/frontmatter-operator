@@ -9,8 +9,7 @@ import {
 import { SetActionModal } from "./ui/modals/SetActionModal";
 import { DeleteActionModal } from "./ui/modals/DeleteActionModal";
 import { RenameActionModal } from "./ui/modals/RenameActionModal";
-import { CopyActionModal } from "./ui/modals/CopyActionModal";
-import { MergeActionModal } from "./ui/modals/MergeActionModal";
+import { CopyMergeActionModal } from "./ui/modals/CopyMergeActionModal";
 import { SnapshotsModal } from "./ui/modals/SnapshotsModal";
 import { FrontmatterEditorAPI } from "./api/FrontmatterEditorAPI";
 import { GeneratorService } from "./services/generator/GeneratorService";
@@ -252,15 +251,31 @@ export default class FrontmatterEditorPlugin extends Plugin {
         ).open();
         break;
       case "copy":
-        new CopyActionModal(this.app, this, rows, scan.properties, refresh).open();
-        break;
-      case "merge":
-        new MergeActionModal(
+        // Legacy command id -- opens the unified transfer modal in Copy
+        // (deleteSource=false) mode, with the value-mapping section
+        // available.
+        new CopyMergeActionModal(
           this.app,
           this,
           rows,
           scan.properties,
           refresh,
+          undefined,
+          "copy",
+        ).open();
+        break;
+      case "merge":
+        // Legacy command id -- opens the unified transfer modal in Move
+        // (deleteSource=true) mode. "Merge" was always implemented as
+        // a Move with a >= 2 source guard; that guard is dropped here.
+        new CopyMergeActionModal(
+          this.app,
+          this,
+          rows,
+          scan.properties,
+          refresh,
+          undefined,
+          "move",
         ).open();
         break;
     }

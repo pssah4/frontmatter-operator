@@ -420,4 +420,186 @@ describe("applyActionPure", () => {
       expect(out.after.moc).toBe("[[Reise]]");
     });
   });
+
+  describe("transfer action (unified Copy / Move with value mapping)", () => {
+    it("Copy mode: identity-map preserves source and writes target", () => {
+      const out = applyActionPure(
+        { Kategorie: "Zettel" },
+        {
+          type: "transfer",
+          fromProperties: ["Kategorie"],
+          toProperty: "category",
+          deleteSource: false,
+          onConflict: "overwrite",
+          transforms: [],
+          valueMappings: [],
+        },
+      );
+      expect(out.after.Kategorie).toBe("Zettel");
+      expect(out.after.category).toBe("Zettel");
+    });
+
+    it("Move mode: source removed after write", () => {
+      const out = applyActionPure(
+        { Kategorie: "Zettel" },
+        {
+          type: "transfer",
+          fromProperties: ["Kategorie"],
+          toProperty: "category",
+          deleteSource: true,
+          onConflict: "overwrite",
+          transforms: [],
+          valueMappings: [],
+        },
+      );
+      expect(out.after.Kategorie).toBeUndefined();
+      expect(out.after.category).toBe("Zettel");
+    });
+
+    it("transform-only: lowercase rewrites every source value", () => {
+      const out = applyActionPure(
+        { Kategorie: "Zettel" },
+        {
+          type: "transfer",
+          fromProperties: ["Kategorie"],
+          toProperty: "category",
+          deleteSource: false,
+          onConflict: "overwrite",
+          transforms: ["lowercase"],
+          valueMappings: [],
+        },
+      );
+      expect(out.after.category).toBe("zettel");
+    });
+
+    it("per-value rewrite Zettel -> zettel", () => {
+      const out = applyActionPure(
+        { Kategorie: "Zettel" },
+        {
+          type: "transfer",
+          fromProperties: ["Kategorie"],
+          toProperty: "category",
+          deleteSource: false,
+          onConflict: "overwrite",
+          transforms: [],
+          valueMappings: [
+            { source: "Zettel", target: "zettel", userEdited: true },
+          ],
+        },
+      );
+      expect(out.after.category).toBe("zettel");
+    });
+
+    it("many-to-one Person + Teilnehmer -> person (across multiple sources)", () => {
+      const out = applyActionPure(
+        { Rolle: "Person", Beteiligte: "Teilnehmer" },
+        {
+          type: "transfer",
+          fromProperties: ["Rolle", "Beteiligte"],
+          toProperty: "person",
+          deleteSource: true,
+          onConflict: "overwrite",
+          transforms: [],
+          valueMappings: [
+            { source: "Person", target: "person", userEdited: true },
+            { source: "Teilnehmer", target: "person", userEdited: true },
+          ],
+        },
+      );
+      // After mapping both sources -> "person", multi-source merge folds
+      // them into the same scalar (dedup), and source props are deleted.
+      expect(out.after.person).toEqual(["person"]);
+      expect(out.after.Rolle).toBeUndefined();
+      expect(out.after.Beteiligte).toBeUndefined();
+    });
+
+    it("list source: each element rewritten + many-to-one dedup", () => {
+      const out = applyActionPure(
+        { roles: ["Person", "Teilnehmer", "Speaker"] },
+        {
+          type: "transfer",
+          fromProperties: ["roles"],
+          toProperty: "people",
+          deleteSource: false,
+          onConflict: "overwrite",
+          transforms: [],
+          valueMappings: [
+            { source: "Person", target: "person", userEdited: true },
+            { source: "Teilnehmer", target: "person", userEdited: true },
+          ],
+        },
+      );
+      expect(out.after.people).toEqual(["person", "Speaker"]);
+    });
+
+    it("transform then mapping: lowercase, then map zettel -> [[zettel]]", () => {
+      const out = applyActionPure(
+        { Kategorie: "ZETTEL" },
+        {
+          type: "transfer",
+          fromProperties: ["Kategorie"],
+          toProperty: "category",
+          deleteSource: false,
+          onConflict: "overwrite",
+          transforms: ["lowercase"],
+          wrapWikilink: true,
+          valueMappings: [
+            { source: "zettel", target: "zettel", userEdited: true },
+          ],
+        },
+      );
+      expect(out.after.category).toBe("[[zettel]]");
+    });
+
+    it("conflict 'skip' on existing target leaves note untouched", () => {
+      const out = applyActionPure(
+        { Kategorie: "Zettel", category: "alreadyHere" },
+        {
+          type: "transfer",
+          fromProperties: ["Kategorie"],
+          toProperty: "category",
+          deleteSource: true,
+          onConflict: "skip",
+          transforms: [],
+          valueMappings: [],
+        },
+      );
+      expect(out.changed).toBe(false);
+      expect(out.after.Kategorie).toBe("Zettel");
+      expect(out.after.category).toBe("alreadyHere");
+    });
+
+    it("conflict 'merge_list' appends mapped values to existing list", () => {
+      const out = applyActionPure(
+        { tags: ["NEW"], allTags: ["existing"] },
+        {
+          type: "transfer",
+          fromProperties: ["tags"],
+          toProperty: "allTags",
+          deleteSource: false,
+          onConflict: "merge_list",
+          transforms: ["lowercase"],
+          valueMappings: [],
+        },
+      );
+      expect(out.after.allTags).toEqual(["existing", "new"]);
+    });
+
+    it("absent source -> skipped", () => {
+      const out = applyActionPure(
+        { other: "x" },
+        {
+          type: "transfer",
+          fromProperties: ["missing"],
+          toProperty: "category",
+          deleteSource: true,
+          onConflict: "overwrite",
+          transforms: [],
+          valueMappings: [],
+        },
+      );
+      expect(out.changed).toBe(false);
+      expect(out.skipped).toContain("no source property");
+    });
+  });
 });

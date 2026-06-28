@@ -127,4 +127,50 @@ export class FrontmatterScanner {
       .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
       .slice(0, limit);
   }
+
+  /**
+   * Collect distinct values across one or more source properties on a
+   * filtered row set, returning a stable count map. Used by the
+   * Transfer modal's value-mapping table to populate the
+   * "source value | count" column.
+   *
+   * Handles:
+   *  - list values: flattened, each element counted separately.
+   *  - wikilink values: unwrapped to the bare link target so the
+   *    mapping table doesn't show duplicate "[[Person]]" and "Person"
+   *    rows. Wrapping is preserved on write by ValueMappingEngine.
+   *  - non-string scalars (numbers/booleans): stringified.
+   *  - null / undefined / empty string: skipped.
+   *
+   * Returned as Array<{ value, count }> sorted desc by count, then
+   * locale-asc by value, so the user sees high-impact rewrites first.
+   */
+  collectDistinctValues(
+    rows: NoteRow[],
+    properties: string[],
+  ): Array<{ value: string; count: number }> {
+    const counter = new Map<string, number>();
+    for (const row of rows) {
+      for (const prop of properties) {
+        const raw = row.frontmatter[prop];
+        if (raw === undefined || raw === null) continue;
+        const items = Array.isArray(raw) ? raw : [raw];
+        for (const item of items) {
+          if (item === null || item === undefined) continue;
+          // Plain object values (e.g. moc topics+concepts) aren't
+          // value-mappable in v1.
+          if (typeof item === "object") continue;
+          const s = typeof item === "string" ? item : String(item);
+          if (s === "") continue;
+          // Unwrap wikilink so "[[Person]]" and "Person" share a row.
+          const unwrapped =
+            s.match(/^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/)?.[1] ?? s;
+          counter.set(unwrapped, (counter.get(unwrapped) ?? 0) + 1);
+        }
+      }
+    }
+    return Array.from(counter.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  }
 }

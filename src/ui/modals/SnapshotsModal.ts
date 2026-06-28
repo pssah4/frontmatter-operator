@@ -116,7 +116,20 @@ function describeAction(action: Snapshot["action"]): string {
         ? action.fromProperties.join(" + ")
         : (legacy ?? "?");
       const verb = action.type === "move" ? "merge" : action.type;
-      return `${verb} ${sources} → ${action.toProperty}`;
+      return `${verb} ${sources} -> ${action.toProperty}`;
+    }
+    case "transfer": {
+      const sources = action.fromProperties.join(" + ");
+      const verb = action.deleteSource ? "move" : "copy";
+      const mapCount = action.valueMappings.length;
+      const transformCount = action.transforms.length;
+      const extras = [
+        transformCount > 0 ? `${transformCount} transform${transformCount === 1 ? "" : "s"}` : null,
+        mapCount > 0 ? `${mapCount} value mapping${mapCount === 1 ? "" : "s"}` : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return `${verb} ${sources} -> ${action.toProperty}${extras ? ` (${extras})` : ""}`;
     }
   }
 }

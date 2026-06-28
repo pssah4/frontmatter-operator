@@ -17,8 +17,7 @@ import { applyFilters, evaluateFilter } from "../services/FilterEngine";
 import { SetActionModal } from "./modals/SetActionModal";
 import { DeleteActionModal } from "./modals/DeleteActionModal";
 import { RenameActionModal } from "./modals/RenameActionModal";
-import { CopyActionModal } from "./modals/CopyActionModal";
-import { MergeActionModal } from "./modals/MergeActionModal";
+import { CopyMergeActionModal } from "./modals/CopyMergeActionModal";
 import { SnapshotsModal } from "./modals/SnapshotsModal";
 import { HelpModal } from "./modals/HelpModal";
 import { confirmModal } from "./modals/ConfirmModal";
@@ -1319,21 +1318,17 @@ export class FrontmatterEditorView extends ItemView {
     );
     renameBtn.addEventListener("click", () => this.openRenameModal());
 
-    const copyBtn = this.makeActionButton(
+    // Unified Copy / Move surface. Mode toggle inside the modal
+    // distinguishes "Copy (keep source)" from "Move (delete source)".
+    // The previous separate Copy + Merge buttons were redundant -- Merge
+    // was just a Move with a >= 2 source guard.
+    const transferBtn = this.makeActionButton(
       buttons,
-      "copy",
-      "Copy",
-      "Copy values from one or more properties into a target (sources kept)",
+      "arrow-right-left",
+      "Copy / Move",
+      "Transfer values between properties, optionally rewriting or merging values during the transfer",
     );
-    copyBtn.addEventListener("click", () => this.openCopyModal());
-
-    const mergeBtn = this.makeActionButton(
-      buttons,
-      "git-merge",
-      "Merge",
-      "Combine several properties into one and delete the sources",
-    );
-    mergeBtn.addEventListener("click", () => this.openMergeModal());
+    transferBtn.addEventListener("click", () => this.openTransferModal());
 
     const delBtn = this.makeActionButton(
       buttons,
@@ -1439,13 +1434,16 @@ export class FrontmatterEditorView extends ItemView {
     ).open();
   }
 
-  private openCopyModal(): void {
+  private openTransferModal(
+    preselectedSource?: string,
+    initialMode?: "copy" | "move",
+  ): void {
     const targets = this.getTargetRows();
     if (targets.length === 0) {
-      new Notice("No notes targeted — adjust the rule first.");
+      new Notice("No notes targeted -- adjust the rule first.");
       return;
     }
-    new CopyActionModal(
+    new CopyMergeActionModal(
       this.app,
       this.plugin,
       targets,
@@ -1453,23 +1451,8 @@ export class FrontmatterEditorView extends ItemView {
       () => {
         void this.refreshScan().then(() => this.render());
       },
-    ).open();
-  }
-
-  private openMergeModal(): void {
-    const targets = this.getTargetRows();
-    if (targets.length === 0) {
-      new Notice("No notes targeted — adjust the rule first.");
-      return;
-    }
-    new MergeActionModal(
-      this.app,
-      this.plugin,
-      targets,
-      this.inventory,
-      () => {
-        void this.refreshScan().then(() => this.render());
-      },
+      preselectedSource,
+      initialMode,
     ).open();
   }
 
