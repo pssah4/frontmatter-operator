@@ -557,16 +557,32 @@ export class ProviderDetailModal extends Modal {
             }
             this.form.discoveredModels = result.models as DiscoveredModel[];
             this.form.discoveredAt = Date.now();
-            // VO maybeAutoRefresh-style promote: if the current default
-            // isn't in the fresh list, pick the FIRST entry from the
-            // pre-sorted result (Bedrock-aware sort already put an
-            // Anthropic inference profile at the top -- exactly the
-            // safe Converse pick). Without this, a fresh provider keeps
-            // the static suggestion default which may not even be
-            // present in the user's actual catalog.
+            // Family-aware promote: AWS sometimes returns the
+            // version-less form (eu.anthropic.claude-opus-4-6) while
+            // our static suggestion has the versioned form
+            // (eu.anthropic.claude-opus-4-6-v1). A strict equality
+            // check then auto-promotes to sorted[0] -- a newer model
+            // the user may have no AWS access to (Opus 4.8 in
+            // eu-central-1). So:
+            //   1. Exact id in cache -> keep.
+            //   2. Family match in cache -> upgrade to the cached form
+            //      (same model the user had selected, just rewritten
+            //      to whatever AWS now calls it).
+            //   3. No match -> promote to sorted[0] (the curated-first
+            //      bedrockSuggestionPriority gate ensures this is a
+            //      VO MODEL_SUGGESTIONS entry whenever possible).
+            const { bedrockFamilyKey } = await import("../../api/fetchModels");
             const cachedIds = new Set(result.models.map((m) => m.id));
-            if (!cachedIds.has(this.initialModelId) && result.models[0]) {
-              this.initialModelId = result.models[0].id;
+            if (!cachedIds.has(this.initialModelId)) {
+              const family = bedrockFamilyKey(this.initialModelId);
+              const familyMatch = result.models.find(
+                (m) => bedrockFamilyKey(m.id) === family,
+              );
+              if (familyMatch) {
+                this.initialModelId = familyMatch.id;
+              } else if (result.models[0]) {
+                this.initialModelId = result.models[0].id;
+              }
             }
             this.discoveryEl.setText(
               `Fetched ${result.models.length} model${result.models.length === 1 ? "" : "s"}.`,

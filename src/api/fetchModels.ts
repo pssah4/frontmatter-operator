@@ -1,7 +1,7 @@
 import { requestUrl } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
 import type { ProviderConfig, ProviderType } from "../types/llm";
-import { DEFAULT_BASE_URLS } from "../types/llm";
+import { DEFAULT_BASE_URLS, MODEL_SUGGESTIONS } from "../types/llm";
 import { signSigV4 } from "../auth/AwsSigV4";
 
 export interface FetchedModel {
@@ -476,30 +476,37 @@ async function fetchBedrock(draft: ProviderConfig): Promise<FetchResult> {
 }
 
 /**
- * Bedrock-specific ordering for the picker. Goal: when the user opens
- * the Default-model dropdown right after a Refresh, the first entry is
- * an Anthropic Claude on a cross-region inference profile (the most
- * common production pick that VO ships as default). Order rules:
+ * Bedrock-specific ordering for the picker. Goal: after Refresh, the
+ * first entry is one we know works -- a model from VO's curated
+ * MODEL_SUGGESTIONS list. Without this gate the dropdown's top slot
+ * was filling with the latest-listed AWS model (e.g. Opus 4.8) even
+ * when the user's AWS account had no access to it, surfacing
+ * "ValidationException: You don't have access to model ..." on the
+ * very first Generate.
+ *
+ * Order rules:
  *   1. Inference-profile-prefixed ids (eu./us./...) before bare ids.
  *      Bare amazon.nova-* / meta.llama* ids cannot be invoked with
- *      on-demand throughput in most regions and surface AWS's
- *      "Invocation of model ID X with on-demand throughput isn't
- *      supported. Retry with the ID or ARN of an inference profile..."
- *      ValidationException.
- *   2. Within each group, vendor priority: anthropic > amazon (nova)
- *      > meta > mistral > cohere > ai21 > everything else. Mirrors
- *      VO's flagship-detection heuristic in classifyModelTier.
- *   3. Within the same vendor, latest model first (rough lex sort on
- *      the version segment).
+ *      on-demand throughput in most regions.
+ *   2. Within profile-class, model families that appear in
+ *      MODEL_SUGGESTIONS.bedrock (curated, known to work on every
+ *      enabled AWS account) win over uncurated ids -- so Opus 4.6
+ *      beats Opus 4.8 until 4.8 is explicitly added to the curated
+ *      list.
+ *   3. Vendor priority: anthropic > amazon (nova) > meta > mistral
+ *      > cohere > ai21 > others.
+ *   4. Lex descending on id, so 4-6-v1 sorts before 4-5-v1.
  */
 function byBedrockPriority(a: FetchedModel, b: FetchedModel): number {
   const ap = bedrockProfilePriority(a.id);
   const bp = bedrockProfilePriority(b.id);
   if (ap !== bp) return ap - bp;
+  const as = bedrockSuggestionPriority(a.id);
+  const bs = bedrockSuggestionPriority(b.id);
+  if (as !== bs) return as - bs;
   const av = bedrockVendorPriority(a.id);
   const bv = bedrockVendorPriority(b.id);
   if (av !== bv) return av - bv;
-  // Lex descending so 4-6-v1 sorts before 4-5-v1 before 3-7 etc.
   return b.id.localeCompare(a.id);
 }
 
@@ -517,6 +524,33 @@ function bedrockVendorPriority(id: string): number {
   if (tail.startsWith("cohere.")) return 4;
   if (tail.startsWith("ai21.")) return 5;
   return 9;
+}
+
+/**
+ * Strip trailing version suffix from a Bedrock id so two ids referring
+ * to the same model family compare equal. Handles:
+ *   eu.anthropic.claude-opus-4-6-v1   -> eu.anthropic.claude-opus-4-6
+ *   eu.anthropic.claude-opus-4-6-v1:0 -> eu.anthropic.claude-opus-4-6
+ *   anthropic.claude-3-5-sonnet-20241022-v2:0
+ *                                     -> anthropic.claude-3-5-sonnet-20241022
+ *   amazon.nova-pro-v1:0              -> amazon.nova-pro
+ * AWS sometimes returns the version-less form in ListInferenceProfiles
+ * and the versioned form in ListFoundationModels. Our static
+ * MODEL_SUGGESTIONS use one or the other; family-key normalization
+ * lets the picker match both.
+ */
+export function bedrockFamilyKey(id: string): string {
+  return id
+    .replace(/[-:]v\d+(:\d+)?$/i, "")
+    .replace(/:\d+$/, "");
+}
+
+const SUGGESTED_BEDROCK_FAMILIES: ReadonlySet<string> = new Set(
+  MODEL_SUGGESTIONS.bedrock.map((s) => bedrockFamilyKey(s.id)),
+);
+
+function bedrockSuggestionPriority(id: string): number {
+  return SUGGESTED_BEDROCK_FAMILIES.has(bedrockFamilyKey(id)) ? 0 : 1;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime SDK types are deep generics; we treat them as a thin send-handle here

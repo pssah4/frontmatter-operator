@@ -206,12 +206,11 @@ export class BedrockProvider implements ApiHandler {
         model: this.model.modelId,
       };
     } catch (err) {
-      // SDK errors carry $metadata + name; surface the short form.
-      const message =
-        err instanceof Error
-          ? `${err.name}: ${err.message}`
-          : String(err);
-      throw new ProviderError(`Bedrock: ${message}`, "bedrock");
+      throw enhanceBedrockError(
+        err,
+        this.model.modelId,
+        this.provider.awsRegion ?? "us-east-1",
+      );
     }
   }
 
@@ -232,4 +231,88 @@ export class BedrockProvider implements ApiHandler {
       };
     }
   }
+}
+
+/**
+ * Translate AWS SDK errors into actionable ProviderError messages.
+ * The default SDK message is technically correct but cryptic for users
+ * who hit the most common failure modes: model-access not granted,
+ * model unavailable in region, on-demand throughput required, account
+ * not authorized. Each branch adds a one-line hint with the exact next
+ * step (e.g. the AWS console URL for model access in the user's region).
+ */
+export function enhanceBedrockError(
+  err: unknown,
+  modelId: string,
+  region: string,
+): ProviderError {
+  if (!(err instanceof Error)) {
+    return new ProviderError(`Bedrock: ${String(err)}`, "bedrock");
+  }
+  const name = err.name || "Error";
+  const msg = err.message || String(err);
+  const lower = msg.toLowerCase();
+
+  // Access denied / model-access not granted in the AWS console.
+  if (
+    name === "AccessDeniedException" ||
+    lower.includes("don't have access") ||
+    lower.includes("not authorized to perform")
+  ) {
+    return new ProviderError(
+      `Bedrock: ${name}: ${msg}\n\nFix: enable model access for "${modelId}" in the AWS Bedrock console -> https://${region}.console.aws.amazon.com/bedrock/home?region=${region}#/modelaccess`,
+      "bedrock",
+    );
+  }
+
+  // Bare-model-id on-demand: AWS asks for an inference profile instead.
+  if (
+    name === "ValidationException" &&
+    lower.includes("on-demand throughput isn't supported")
+  ) {
+    return new ProviderError(
+      `Bedrock: ${name}: ${msg}\n\nFix: open the provider modal, click Re-refresh in Discovery, and pick an inference profile id (prefix eu./us./ap./...). Bare ids require provisioned throughput.`,
+      "bedrock",
+    );
+  }
+
+  // Model not available in this region or doesn't exist on Bedrock.
+  if (
+    name === "ValidationException" &&
+    (lower.includes("not available") ||
+      lower.includes("not found") ||
+      lower.includes("does not exist") ||
+      lower.includes("invalid model"))
+  ) {
+    return new ProviderError(
+      `Bedrock: ${name}: ${msg}\n\nFix: model "${modelId}" is not available in ${region}. Open the provider modal, click Re-refresh in Discovery, and pick a model from the updated list.`,
+      "bedrock",
+    );
+  }
+
+  // Generic 400 -- often "model not enabled for this account" without
+  // an explicit access-denied wording. Surface the AWS message verbatim
+  // and add the console link as a likely-fix hint.
+  if (name === "ValidationException") {
+    return new ProviderError(
+      `Bedrock: ${name}: ${msg}\n\nIf the model id looks correct, check that it's enabled for your account at https://${region}.console.aws.amazon.com/bedrock/home?region=${region}#/modelaccess and that your AWS region (${region}) actually hosts this model.`,
+      "bedrock",
+    );
+  }
+
+  if (name === "ThrottlingException" || name === "TooManyRequestsException") {
+    return new ProviderError(
+      `Bedrock: ${name}: ${msg}\n\nFix: AWS is rate-limiting. Wait a moment and retry, or request a quota increase in the AWS console.`,
+      "bedrock",
+    );
+  }
+
+  if (name === "UnrecognizedClientException") {
+    return new ProviderError(
+      `Bedrock: ${name}: ${msg}\n\nFix: the AWS credentials are invalid or expired. Re-enter API key / Access key in the provider modal.`,
+      "bedrock",
+    );
+  }
+
+  return new ProviderError(`Bedrock: ${name}: ${msg}`, "bedrock");
 }
