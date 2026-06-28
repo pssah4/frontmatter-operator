@@ -31,11 +31,17 @@ import type { FmValue } from "../../types";
 const WIKILINK_RE = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/;
 
 export interface EditableCellHandlers {
-  /** Called when the user commits a new value. Returns a promise so
-   *  the cell can show a brief saving state on slow writes. */
-  onSave: (next: FmValue | undefined) => Promise<void>;
+  /** Called when the user commits a new value. Omitted when readOnly
+   *  is true (virtual properties don't write back to the vault). */
+  onSave?: (next: FmValue | undefined) => Promise<void>;
   /** Called when the user clicks a wikilink in display mode. */
   openLink: (target: string) => void;
+  /** When true the cell skips the click-to-edit handler, suppresses
+   *  the "+ add" hint, and adds a .fm-editor-cell-virtual class so
+   *  the hover cursor stays default. Used for virtual properties
+   *  (__folder, __filename, __extension) which resolve dynamically
+   *  from the path and shouldn't be writeable in v1. */
+  readOnly?: boolean;
 }
 
 /**
@@ -52,9 +58,18 @@ export function renderEditableCell(
 ): void {
   td.empty();
   td.addClass("fm-editor-cell-editable");
+  td.toggleClass("fm-editor-cell-virtual", !!handlers.readOnly);
 
   const display = td.createDiv({ cls: "fm-editor-cell-display" });
-  renderDisplayMode(display, value, handlers.openLink);
+  // Virtual cells suppress the "+ add" affordance entirely -- their
+  // value is resolved from the path, "adding" makes no sense.
+  if (handlers.readOnly && value === undefined) {
+    display.setText("");
+  } else {
+    renderDisplayMode(display, value, handlers.openLink);
+  }
+
+  if (handlers.readOnly) return;
 
   // The whole cell is clickable -- catches blank space too so a click
   // on an empty/null cell enters edit mode (otherwise the user has
@@ -200,7 +215,7 @@ async function commit(
 ): Promise<void> {
   td.addClass("is-saving");
   try {
-    await handlers.onSave(next);
+    if (handlers.onSave) await handlers.onSave(next);
   } finally {
     td.removeClass("is-saving");
   }

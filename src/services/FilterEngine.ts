@@ -4,6 +4,7 @@ import type {
   FmValue,
   NoteRow,
 } from "../types";
+import { VirtualProperties } from "./VirtualProperties";
 
 // HARD-03: cap the source length of a user-supplied regex to bound the worst
 // case for catastrophic backtracking. 200 chars is enough for any reasonable
@@ -39,9 +40,21 @@ function isEmptyValue(v: unknown): boolean {
 
 export function evaluateFilter(filter: Filter, row: NoteRow): boolean {
   const cs = !!filter.caseSensitive;
+  // Virtual properties (__folder, __filename, __extension) resolve
+  // via the registry instead of row.frontmatter. The synthesized
+  // value participates in every operator just like a real frontmatter
+  // value would. in_path stays property-agnostic -- it always reads
+  // row.path regardless of filter.property.
+  const isVirtual = VirtualProperties.isVirtual(filter.property);
   const fm = row.frontmatter;
-  const has = Object.prototype.hasOwnProperty.call(fm, filter.property);
-  const value = has ? fm[filter.property] : undefined;
+  const has = isVirtual
+    ? VirtualProperties.resolve(filter.property, row) !== undefined
+    : Object.prototype.hasOwnProperty.call(fm, filter.property);
+  const value = isVirtual
+    ? VirtualProperties.resolve(filter.property, row)
+    : has
+      ? fm[filter.property]
+      : undefined;
   const rawNeedle = filter.value ?? "";
   const needle = cs ? rawNeedle : rawNeedle.toLowerCase();
 

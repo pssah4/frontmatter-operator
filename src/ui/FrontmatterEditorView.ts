@@ -27,6 +27,7 @@ import { GenerateActionModal } from "./modals/GenerateActionModal";
 import { Combobox } from "./components/Combobox";
 import { renderEditableCell } from "./components/EditableCell";
 import { waitForMetadataChange } from "../services/generator/GeneratorService";
+import { VirtualProperties } from "../services/VirtualProperties";
 import {
   MultiSelectPopover,
   type MultiOption,
@@ -96,16 +97,39 @@ export class FrontmatterEditorView extends ItemView {
 
   async refreshScan(): Promise<void> {
     const scan = this.plugin.scanner.scan();
-    this.inventory = scan.properties;
     this.allRows = this.plugin.scanner.buildAllRows();
+    // Virtuals (Folder / Filename / Extension) sit at the top of the
+    // inventory so they're easy to pick in the column + WHEN-bar
+    // pickers. They're keyed by __-prefixed ids that won't collide
+    // with real frontmatter keys.
+    this.inventory = [
+      ...VirtualProperties.asInventoryEntries(this.allRows.length),
+      ...scan.properties,
+    ];
     if (this.columns.length === 0) {
       this.columns = this.suggestColumns();
     } else {
-      this.columns = this.columns.filter((c) =>
-        this.inventory.some((p) => p.name === c.property),
+      // Keep virtual columns even when no frontmatter entry matches --
+      // their value lives on the file, not in the frontmatter, so the
+      // "is the property still present anywhere" check doesn't apply.
+      this.columns = this.columns.filter(
+        (c) =>
+          VirtualProperties.isVirtual(c.property) ||
+          this.inventory.some((p) => p.name === c.property),
       );
     }
     this.recomputeFilteredRows();
+  }
+
+  /**
+   * Read the value for a column on a given row, honouring virtual
+   * properties. Used by sort + per-column filter + cell render so
+   * none of those paths need to know about the __-prefix convention.
+   */
+  private readCol(row: NoteRow, property: string): FmValue | undefined {
+    return VirtualProperties.isVirtual(property)
+      ? VirtualProperties.resolve(property, row)
+      : row.frontmatter[property];
   }
 
   private suggestColumns(): ColumnState[] {
@@ -150,8 +174,8 @@ export class FrontmatterEditorView extends ItemView {
       rows = rows.slice().sort((a, b) => {
         for (const col of sortCols) {
           const cmp = compareValues(
-            a.frontmatter[col.property],
-            b.frontmatter[col.property],
+            this.readCol(a, col.property),
+            this.readCol(b, col.property),
           );
           if (cmp !== 0) return col.sort === "asc" ? cmp : -cmp;
         }
@@ -307,12 +331,26 @@ export class FrontmatterEditorView extends ItemView {
       this.activeMultiSelectPopover = null;
       return;
     }
-    const options: MultiOption[] = this.inventory.map((p) => ({
-      value: p.name,
-      label: p.name,
-      hint: Array.from(p.types).join(" / "),
-      meta: String(p.count),
-    }));
+    // Virtual properties (folder / filename / extension) get a
+    // friendly label + a "Note metadata" hint so they're
+    // distinguishable from real frontmatter keys in the picker.
+    const options: MultiOption[] = this.inventory.map((p) => {
+      const vp = VirtualProperties.get(p.name);
+      if (vp) {
+        return {
+          value: vp.id,
+          label: vp.label,
+          hint: "Note metadata",
+          meta: "",
+        };
+      }
+      return {
+        value: p.name,
+        label: p.name,
+        hint: Array.from(p.types).join(" / "),
+        meta: String(p.count),
+      };
+    });
     const selected = new Set(this.columns.map((c) => c.property));
     const popover = new MultiSelectPopover({
       options,
@@ -544,12 +582,23 @@ export class FrontmatterEditorView extends ItemView {
     });
     propCombo.mount(propWrap, filter.property);
     propCombo.setOptions(
-      this.inventory.map((p) => ({
-        value: p.name,
-        label: p.name,
-        hint: Array.from(p.types).join(" / "),
-        meta: String(p.count),
-      })),
+      this.inventory.map((p) => {
+        const vp = VirtualProperties.get(p.name);
+        if (vp) {
+          return {
+            value: vp.id,
+            label: vp.label,
+            hint: "Note metadata",
+            meta: "",
+          };
+        }
+        return {
+          value: p.name,
+          label: p.name,
+          hint: Array.from(p.types).join(" / "),
+          meta: String(p.count),
+        };
+      }),
     );
 
     const opSelect = row.createEl("select", { cls: "fm-editor-chip-op" });
@@ -922,13 +971,17 @@ export class FrontmatterEditorView extends ItemView {
 
       for (const col of this.columns) {
         const td = tr.createEl("td", { cls: "fm-editor-col-val" });
-        renderEditableCell(td, row.frontmatter[col.property], {
+        const isV = VirtualProperties.isVirtual(col.property);
+        renderEditableCell(td, this.readCol(row, col.property), {
           openLink: (linkText) => {
             void this.app.workspace.openLinkText(linkText, row.path, false);
           },
-          onSave: async (next) => {
-            await this.writeNoteProperty(row.path, col.property, next);
-          },
+          onSave: isV
+            ? undefined
+            : async (next) => {
+                await this.writeNoteProperty(row.path, col.property, next);
+              },
+          readOnly: isV,
         });
       }
       tr.createEl("td", { cls: "fm-editor-col-add" });
@@ -947,6 +1000,10 @@ export class FrontmatterEditorView extends ItemView {
     property: string,
     next: FmValue | undefined,
   ): Promise<void> {
+    // Virtual properties resolve from the file path; v1 doesn't let
+    // the user "edit" them. Defence in depth -- the cell renderer
+    // already suppresses click-to-edit for virtuals.
+    if (VirtualProperties.isVirtual(property)) return;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) {
       new Notice(`Note not found: ${path}`);
@@ -1075,10 +1132,25 @@ export class FrontmatterEditorView extends ItemView {
       this.cycleSort(col);
     });
 
-    nameWrap.createSpan({
-      text: col.property,
-      cls: "fm-editor-col-head-name",
-    });
+    // Virtual columns get a small icon + their friendly label so the
+    // header doesn't show the raw "__folder" id. Real properties keep
+    // their key as the label.
+    const vp = VirtualProperties.get(col.property);
+    if (vp) {
+      const iconSpan = nameWrap.createSpan({
+        cls: "fm-editor-col-head-icon",
+      });
+      setIcon(iconSpan, vp.icon);
+      nameWrap.createSpan({
+        text: vp.label,
+        cls: "fm-editor-col-head-name fm-editor-col-head-name-virtual",
+      });
+    } else {
+      nameWrap.createSpan({
+        text: col.property,
+        cls: "fm-editor-col-head-name",
+      });
+    }
     if (col.sort === "asc") {
       const ind = nameWrap.createSpan({ cls: "fm-editor-col-sort-ind" });
       setIcon(ind, "arrow-up");

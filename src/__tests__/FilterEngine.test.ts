@@ -139,3 +139,113 @@ describe("applyFilters", () => {
     expect(applyFilters(ROWS, [], "AND")).toHaveLength(ROWS.length);
   });
 });
+
+describe("evaluateFilter -- virtual properties", () => {
+  // Build a row that exposes a `parent` on the synthetic file so the
+  // VirtualProperties resolver can read it (mirrors what
+  // FrontmatterScanner.buildAllRows produces in production).
+  function vrow(path: string, ext = "md"): NoteRow {
+    const last = path.split("/").pop()!;
+    const basename = last.replace(/\.[^.]+$/, "");
+    const parentPath = path.includes("/")
+      ? path.slice(0, path.lastIndexOf("/"))
+      : "";
+    return {
+      file: {
+        path,
+        basename,
+        extension: ext,
+        parent: path.includes("/") ? { path: parentPath } : null,
+      } as never,
+      path,
+      basename,
+      frontmatter: {},
+    };
+  }
+
+  const VIRTUAL_ROWS = [
+    vrow("notes/area/topic.md"),
+    vrow("notes/area/other.md"),
+    vrow("notes/different/file.md"),
+    vrow("at-root.md"),
+  ];
+
+  it("equals on __folder", () => {
+    const f: Filter = {
+      id: "1",
+      property: "__folder",
+      operator: "equals",
+      value: "notes/area",
+    };
+    expect(
+      VIRTUAL_ROWS.filter((r) => evaluateFilter(f, r)).map((r) => r.path),
+    ).toEqual(["notes/area/topic.md", "notes/area/other.md"]);
+  });
+
+  it("contains on __folder", () => {
+    const f: Filter = {
+      id: "1",
+      property: "__folder",
+      operator: "contains",
+      value: "area",
+    };
+    expect(
+      VIRTUAL_ROWS.filter((r) => evaluateFilter(f, r)).map((r) => r.path),
+    ).toEqual(["notes/area/topic.md", "notes/area/other.md"]);
+  });
+
+  it("equals on __filename", () => {
+    const f: Filter = {
+      id: "1",
+      property: "__filename",
+      operator: "equals",
+      value: "topic",
+    };
+    expect(
+      VIRTUAL_ROWS.filter((r) => evaluateFilter(f, r)).map((r) => r.path),
+    ).toEqual(["notes/area/topic.md"]);
+  });
+
+  it("equals on __extension matches md notes", () => {
+    const f: Filter = {
+      id: "1",
+      property: "__extension",
+      operator: "equals",
+      value: "md",
+    };
+    expect(VIRTUAL_ROWS.filter((r) => evaluateFilter(f, r))).toHaveLength(4);
+  });
+
+  it("exists on __folder is true for root-level notes (empty string IS a value)", () => {
+    // VirtualProperties.resolve never returns undefined for __folder
+    // (root notes resolve to ""), so 'exists' is true everywhere.
+    const f: Filter = { id: "1", property: "__folder", operator: "exists" };
+    expect(VIRTUAL_ROWS.filter((r) => evaluateFilter(f, r))).toHaveLength(4);
+  });
+
+  it("is_empty on __folder catches vault-root notes", () => {
+    const f: Filter = {
+      id: "1",
+      property: "__folder",
+      operator: "is_empty",
+    };
+    expect(
+      VIRTUAL_ROWS.filter((r) => evaluateFilter(f, r)).map((r) => r.path),
+    ).toEqual(["at-root.md"]);
+  });
+
+  it("in_path stays based on row.path, not filter.property", () => {
+    // Regression: in_path must not accidentally read the virtual value
+    // for the property -- it's the only operator that's
+    // property-agnostic.
+    const f: Filter = {
+      id: "1",
+      property: "__folder",
+      operator: "in_path",
+      value: "different",
+    };
+    expect(
+      VIRTUAL_ROWS.filter((r) => evaluateFilter(f, r)).map((r) => r.path),
+    ).toEqual(["notes/different/file.md"]);
+  });
+});

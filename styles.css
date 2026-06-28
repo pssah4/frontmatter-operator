@@ -1570,6 +1570,35 @@
 }
 
 /* ----------------------------------------------------------------
+ * Virtual properties (folder / filename / extension) -- read-only
+ * cells + a small header icon. The hover affordances of editable
+ * cells are suppressed so the user doesn't expect click-to-edit.
+ * ---------------------------------------------------------------- */
+
+.fm-editor-cell-editable.fm-editor-cell-virtual {
+  cursor: default;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+.fm-editor-cell-editable.fm-editor-cell-virtual:hover .fm-editor-cell-display {
+  background: transparent;
+  border-color: transparent;
+}
+
+.fm-editor-col-head-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  color: var(--text-muted);
+}
+
+.fm-editor-col-head-name-virtual {
+  font-style: italic;
+}
+
+/* ----------------------------------------------------------------
  * Editable cells (Obsidian Bases-style inline editing in the table)
  * ---------------------------------------------------------------- */
 
