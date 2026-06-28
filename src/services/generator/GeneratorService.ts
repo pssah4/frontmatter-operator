@@ -97,10 +97,21 @@ export class GeneratorService {
       opts.onProgress?.(i + 1, opts.targets.length, file);
 
       // ---- conflict gate ----
+      // Skip-mode trap: a list_string property whose existing value
+      // is itself a polluted refusal list from a pre-detector run
+      // would otherwise be treated as "already has a value" and the
+      // note would be silently skipped forever. Detect that
+      // pollution and let the run proceed -- applyToFrontmatter will
+      // then overwrite the bad list with the fresh, clean one.
       if (conflictMode === "skip") {
         const meta = this.app.metadataCache.getFileCache(file);
         const existing = meta?.frontmatter?.[opts.preset.targetProperty];
-        if (!isEmptyExisting(existing)) {
+        const isPollutedList =
+          opts.preset.parser === "list_string" &&
+          Array.isArray(existing) &&
+          existing.length > 0 &&
+          listLooksLikeRefusal(existing.map(String));
+        if (!isEmptyExisting(existing) && !isPollutedList) {
           result.skippedCount++;
           result.skipped.push({
             path: file.path,
@@ -318,8 +329,17 @@ export class GeneratorService {
           fm[property] = incoming as never;
           return;
         }
-        // append (or skip-with-race): merge
-        fm[property] = mergeStringLists(arr(existingRaw), incoming) as never;
+        // append (or skip-with-race): merge. CRITICAL guard --
+        // scrub refusal-shaped legacy values from existingRaw
+        // BEFORE merging. Without this, a single previous broken
+        // run leaves polluted strings in fm[tags] that get
+        // perpetuated forever on every subsequent append run, even
+        // when every new LLM response is correctly caught by the
+        // upstream detectors. This is what produced the 476-note
+        // leak the user reported after the third "supposedly
+        // final" fix.
+        const cleanExisting = sanitizeExistingListString(arr(existingRaw));
+        fm[property] = mergeStringLists(cleanExisting, incoming) as never;
         return;
       }
       // single_line_text (description et al.)
@@ -495,7 +515,7 @@ export function listLooksLikeRefusal(items: string[]): boolean {
   return sentenceLike * 2 >= items.length;
 }
 
-function looksLikeKeyword(item: string): boolean {
+export function looksLikeKeyword(item: string): boolean {
   const s = item.trim();
   if (s.length === 0) return false;
   // Endmark = sentence
@@ -510,6 +530,66 @@ function looksLikeKeyword(item: string): boolean {
   const wordCount = s.split(/\s+/).length;
   if (wordCount > 6) return false;
   return true;
+}
+
+/**
+ * Substrings the cleanup pass treats as "definitely a refusal" even
+ * when looksLikeKeyword wouldn't flag the exact item. Used by the
+ * generator's append-branch guard and by RefusalTagCleanupService.
+ * All lowercase; matched case-insensitively against item.trim().
+ * The first four are the exact phrasings the user pulled out of his
+ * 476-note leak after the third "supposedly final" fix.
+ */
+export const KNOWN_REFUSAL_SUBSTRINGS: readonly string[] = [
+  "based on the note content provided",
+  "i need to see the active note",
+  "no note content was shared",
+  "i'll wait for the actual note content",
+  "i need to see the note",
+  "please provide the note",
+  "without the actual note",
+  "unable to generate",
+  "unable_to_generate", // the sentinel itself (with underscores)
+  "cannot generate",
+  "the note appears to be empty",
+  "the note content is insufficient",
+  "ich brauche den inhalt",
+  "ich warte auf den note-inhalt",
+  "die notiz ist leer",
+];
+
+/**
+ * Does this single string look like a refusal token that the user
+ * never wants to see in their tag list? Combines the structural
+ * "not-keyword-shaped" check with a known-phrase substring check.
+ * Used to filter EXISTING fm[tags] entries on append so a polluted
+ * pre-fix run can't perpetuate itself.
+ */
+export function isRefusalItem(item: string): boolean {
+  const s = item.trim();
+  if (s.length === 0) return false;
+  if (!looksLikeKeyword(s)) return true;
+  const lower = s.toLowerCase();
+  return KNOWN_REFUSAL_SUBSTRINGS.some((p) => lower.includes(p));
+}
+
+/**
+ * Scrub refusal-shaped strings from a previously-stored list_string
+ * frontmatter value so they aren't perpetuated by an "append" run.
+ *
+ * Strategy:
+ *   - If the whole list reads as a disguised refusal (>=50% items
+ *     sentence-shaped via listLooksLikeRefusal), drop everything.
+ *     A list that's mostly garbage rarely has salvageable real items.
+ *   - Otherwise drop only the sentence-shaped or known-refusal
+ *     items. Real keywords stay. Mixed lists (a few real tags +
+ *     a few refusal fragments) get cleaned without losing the
+ *     legitimate work the user already did.
+ */
+export function sanitizeExistingListString(existing: string[]): string[] {
+  if (existing.length === 0) return existing;
+  if (listLooksLikeRefusal(existing)) return [];
+  return existing.filter((it) => !isRefusalItem(it));
 }
 
 function interpolate(template: string, vars: Record<string, string>): string {

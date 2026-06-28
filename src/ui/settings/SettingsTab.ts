@@ -41,6 +41,22 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
 
     this.renderProvidersSection();
     this.renderGeneratorsSection();
+    this.renderMaintenanceSection();
+  }
+
+  private renderMaintenanceSection(): void {
+    const { containerEl } = this;
+    new Setting(containerEl).setName("Maintenance").setHeading();
+    new Setting(containerEl)
+      .setName("Clean refusal text from tags")
+      .setDesc(
+        "Scan every note in the vault and remove sentence-shaped or known-refusal items from the `tags` property (e.g. legacy leakage like \"Based on the note content provided\"). Snapshot is saved so the cleanup is undoable.",
+      )
+      .addButton((b) => {
+        b.setButtonText("Run cleanup").onClick(async () => {
+          await this.plugin.runRefusalCleanup();
+        });
+      });
   }
 
   private renderProvidersSection(): void {

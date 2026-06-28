@@ -145,6 +145,14 @@ export default class FrontmatterEditorPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "cleanup-refusal-tags",
+      name: "Clean refusal text from tags across the vault",
+      callback: () => {
+        void this.runRefusalCleanup();
+      },
+    });
+
+    this.addCommand({
       id: "list-properties",
       name: "Print frontmatter property inventory to console",
       callback: () => {
@@ -159,6 +167,39 @@ export default class FrontmatterEditorPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_FRONTMATTER_EDITOR);
+  }
+
+  /**
+   * Two-phase refusal-tag cleanup (also reachable from the Settings
+   * Maintenance section). Phase 1 runs a dry-run scan, shows the
+   * user how many notes would change. Phase 2 only fires after the
+   * user confirms; takes a single snapshot so the whole batch is
+   * undoable via the existing snapshot machinery.
+   */
+  async runRefusalCleanup(): Promise<void> {
+    const { RefusalTagCleanupService } = await import(
+      "./services/RefusalTagCleanupService"
+    );
+    const service = new RefusalTagCleanupService(this.app, this.snapshots);
+    const dry = await service.run({ dryRun: true });
+    if (dry.notesTouched === 0) {
+      new Notice(
+        `Refusal-tag cleanup: scanned ${dry.notesScanned} notes, nothing to clean.`,
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `Clean refusal text from tags across the vault?\n\n` +
+        `${dry.notesTouched} of ${dry.notesScanned} notes will be modified ` +
+        `(${dry.itemsRemoved} items removed). A snapshot is saved so the ` +
+        `action is undoable via "Undo last frontmatter action".`,
+    );
+    if (!ok) return;
+    const real = await service.run({ dryRun: false });
+    new Notice(
+      `Refusal-tag cleanup: cleaned ${real.notesTouched}/${real.notesScanned} notes, ` +
+        `removed ${real.itemsRemoved} items. Undo via "Undo last frontmatter action".`,
+    );
   }
 
   async loadSettings(): Promise<void> {
