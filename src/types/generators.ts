@@ -49,13 +49,15 @@ export const GENERATOR_LANGUAGE_LABELS: Record<GeneratorLanguage, string> = {
  */
 const SHARED_GUARDRAIL: Record<GeneratorLanguage, string> = {
   en: `IMPORTANT:
-- Return ONLY the output block in the requested format. No explanations, no extra prose, no code fences other than the requested ones.
+- Return ONLY the output block in the requested format. No explanations, no extra prose, no code fences other than the requested ones, no apologies, no commentary, no "Based on...", no "I need...", no "I'll wait...", no "Since no...", no requests for clarification.
 - Do not write any YAML, do not invent additional frontmatter keys.
-- The plugin parses your output deterministically and merges it into the note. Existing properties are preserved by the plugin; you do not need to consider them.`,
+- The plugin parses your output deterministically and merges it into the note. Existing properties are preserved by the plugin; you do not need to consider them.
+- If the note content is empty, missing or too short to extract meaningful output: respond with EXACTLY the single literal token UNABLE_TO_GENERATE on its own line. No other text. The plugin will skip this note silently. Do NOT generate placeholder content, refusal sentences, or apologies disguised as output.`,
   de: `WICHTIG:
-- Gib AUSSCHLIESSLICH den Ausgabe-Block im verlangten Format zurück. Keine Erklärungen, keine zusätzliche Prosa, keine anderen Code-Fences als die verlangten.
+- Gib AUSSCHLIESSLICH den Ausgabe-Block im verlangten Format zurück. Keine Erklärungen, keine zusätzliche Prosa, keine anderen Code-Fences als die verlangten, keine Entschuldigungen, keine Kommentare, kein "Basierend auf...", kein "Ich brauche...", kein "Ich warte auf...", keine Rückfragen.
 - Schreibe kein YAML, erfinde keine zusätzlichen Frontmatter-Properties.
-- Das Plugin parst deine Ausgabe deterministisch und fügt sie in die Note ein. Bestehende Properties bleiben durch das Plugin erhalten; du musst sie nicht berücksichtigen.`,
+- Das Plugin parst deine Ausgabe deterministisch und fügt sie in die Note ein. Bestehende Properties bleiben durch das Plugin erhalten; du musst sie nicht berücksichtigen.
+- Wenn der Note-Inhalt leer, fehlend oder zu kurz für eine sinnvolle Ausgabe ist: antworte mit EXAKT dem einzelnen Literal-Token UNABLE_TO_GENERATE auf einer eigenen Zeile. Kein weiterer Text. Das Plugin überspringt diese Note dann stillschweigend. Erzeuge KEINEN Platzhalter-Inhalt, KEINE Refusal-Sätze, KEINE Entschuldigungen verkleidet als Ausgabe.`,
 };
 
 /** Built-in description preset: one-sentence summary in target language. */

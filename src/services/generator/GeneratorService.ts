@@ -169,6 +169,25 @@ export class GeneratorService {
         continue;
       }
 
+      // ---- post-parse refusal sanity-check (list_string) ----
+      // A model that produces a YAML-valid list of refusal sentences
+      // (each "- " followed by "I need to see...") would otherwise
+      // get written to frontmatter as "keywords". Detect that the
+      // list shape contains sentence-like items and skip instead.
+      if (
+        opts.preset.parser === "list_string" &&
+        Array.isArray(parsed.value) &&
+        listLooksLikeRefusal((parsed.value as unknown[]).map(String))
+      ) {
+        result.skippedCount++;
+        result.skipped.push({
+          path: file.path,
+          reason:
+            "LLM produced a list of refusal sentences instead of keywords (note may be empty or unclear)",
+        });
+        continue;
+      }
+
       try {
         await this.applyToFrontmatter(
           file,
@@ -291,16 +310,36 @@ function isEmptyExisting(v: unknown): boolean {
 }
 
 /**
- * Heuristic: detect refusal / "can't generate" responses from the LLM.
- * Intentionally conservative -- false positives here mean a valid
- * answer gets dropped, so we only match clear English / German
- * refusal phrasings, never substrings that could appear in a real
- * description. Caller skips notes that match.
+ * Sentinel the prompt asks the model to emit when it has nothing to
+ * generate (empty note, content too short). Exported so the parser
+ * sanity-check can short-circuit on it too.
  */
-function looksLikeRefusal(text: string): boolean {
-  const lower = text.toLowerCase().trim();
-  if (lower.length > 300) return false; // a long answer is an answer
-  const patterns = [
+export const REFUSAL_SENTINEL = "UNABLE_TO_GENERATE";
+
+/**
+ * Heuristic: detect refusal / "can't generate" responses from the LLM.
+ * Catches two classes:
+ *   1. The model emits our requested sentinel UNABLE_TO_GENERATE.
+ *   2. The model ignores the instruction and produces prose-style
+ *      refusal: "I cannot...", "Sorry I am unable...", "I need to see
+ *      the active note...", "since no note content was shared",
+ *      "I'll wait for the note content", "Based on the note content
+ *      provided...", "Please share the note content", "Without the
+ *      actual note...", plus German variants. Match on prefix OR
+ *      anywhere in a short response so list-formatted refusals
+ *      ("- I need to see...\n- I'll wait...") still trip.
+ * Length cap (600 chars) keeps long, real answers safe.
+ */
+export function looksLikeRefusal(text: string): boolean {
+  const trimmed = text.trim();
+  // Direct sentinel hit -- model played by the rules.
+  if (trimmed === REFUSAL_SENTINEL || trimmed.includes(REFUSAL_SENTINEL)) {
+    return true;
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower.length > 600) return false; // a long answer is an answer
+  // Prefix patterns (legacy + the new ones the user actually saw).
+  const prefixPatterns = [
     /^i (cannot|can't|am unable to|am not able to)\b/,
     /^sorry,? i (cannot|can't|am unable)/,
     /^there is (no|nothing) (content|information|text) (to|that)/,
@@ -310,7 +349,63 @@ function looksLikeRefusal(text: string): boolean {
     /^(ich kann|leider kann ich) (das|dies)? ?nicht/,
     /^die notiz (ist|scheint) leer/,
   ];
-  return patterns.some((re) => re.test(lower));
+  if (prefixPatterns.some((re) => re.test(lower))) return true;
+  // Anywhere-in-text patterns: catches list-shaped refusals where
+  // each item is one of these phrasings. The phrases are specific
+  // enough to never appear in a real description or keyword.
+  const anywherePatterns = [
+    /\bi need to see (the |an? )?(active |original )?note\b/,
+    /\bno note content (was|is) (shared|provided|given)\b/,
+    /\bi(?:'| wi)ll wait for the note content\b/,
+    /\bplease (share|provide|paste) (the |your )?note (content|text|body)\b/,
+    /\bwithout (the actual |any )?(note|content)\b/,
+    /\bbased on the note content provided\b.*\b(i|cannot|please)\b/,
+    /\bich (brauche|benötige) (den |die )?(note|notiz|inhalt)\b/,
+    /\bbitte (teile|schicke|gib mir) (den |die )?(inhalt|note|notiz)\b/,
+  ];
+  return anywherePatterns.some((re) => re.test(lower));
+}
+
+/**
+ * Post-parse sanity check on a list_string result. The Keywords
+ * preset (and any other list-typed generator) can be fooled when
+ * the model emits a YAML-valid list whose items are refusal
+ * sentences: "- I need to see...\n- I'll wait...". The parser sees
+ * a valid string[] and returns ok. This check decides the result is
+ * actually a disguised refusal when EVERY list item looks like a
+ * sentence rather than a keyword.
+ *
+ * Definition of "keyword-like": short (<= 6 words), no leading
+ * "I/We/You", no trailing period, no question marks. A real keyword
+ * preset hits these every time; a refusal sentence almost never does.
+ *
+ * Threshold: if more than half the items are NOT keyword-like, treat
+ * the whole list as refusal-shaped. Single-item lists are kept if
+ * the one item passes (so an over-strict generator that returned a
+ * single keyword still works).
+ */
+export function listLooksLikeRefusal(items: string[]): boolean {
+  if (items.length === 0) return false;
+  const sentenceLike = items.filter((it) => !looksLikeKeyword(it)).length;
+  // Half or more sentence-shaped items => refusal.
+  return sentenceLike * 2 >= items.length;
+}
+
+function looksLikeKeyword(item: string): boolean {
+  const s = item.trim();
+  if (s.length === 0) return false;
+  // Endmark = sentence
+  if (/[.!?]$/.test(s) && !/\.\.\.$/.test(s)) return false;
+  // Question mark anywhere = not a keyword
+  if (/[?]/.test(s)) return false;
+  // Leading pronoun = sentence
+  if (/^(i|we|you|the|please|sorry|based|since|because|without|note|notiz|ich|wir|du|sie|bitte)\b/i.test(s)) {
+    return false;
+  }
+  // Too long for a keyword (> 6 words counting hyphenated as one)
+  const wordCount = s.split(/\s+/).length;
+  if (wordCount > 6) return false;
+  return true;
 }
 
 function interpolate(template: string, vars: Record<string, string>): string {
