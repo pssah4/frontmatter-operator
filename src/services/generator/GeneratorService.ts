@@ -4,6 +4,7 @@ import type {
   GeneratorLanguage,
   GeneratorPreset,
 } from "../../types/generators";
+import { GENERATOR_GUARDRAIL } from "../../types/generators";
 import type { ProviderConfig, RunModelOptions } from "../../types/llm";
 import { buildApiHandler } from "../../api/ProviderRegistry";
 import type FrontmatterEditorPlugin from "../../main";
@@ -83,12 +84,13 @@ export class GeneratorService {
     };
     const conflictMode: GeneratorConflictMode = opts.conflictMode ?? "skip";
     const handler = await buildApiHandler(opts.provider, opts.model, this.plugin);
-    const prompts = opts.preset.prompts[opts.language];
-    if (!prompts) {
+    const userPromptTemplate = opts.preset.prompts[opts.language];
+    if (!userPromptTemplate) {
       throw new Error(
         `Preset ${opts.preset.id} has no prompt for language ${opts.language}`,
       );
     }
+    const systemPrompt = GENERATOR_GUARDRAIL[opts.language];
 
     for (let i = 0; i < opts.targets.length; i++) {
       const file = opts.targets[i];
@@ -119,7 +121,7 @@ export class GeneratorService {
         continue;
       }
 
-      const userPrompt = interpolate(prompts.userPrompt, {
+      const userPrompt = interpolate(userPromptTemplate, {
         NOTE_BODY: body.slice(0, MAX_BODY_CHARS),
         NOTE_TITLE: file.basename,
         KNOWN_TOPICS: (opts.knownTopics ?? []).join(", "),
@@ -131,7 +133,7 @@ export class GeneratorService {
       let completionText: string;
       try {
         const completion = await handler.complete({
-          systemPrompt: prompts.systemPrompt,
+          systemPrompt,
           messages: [{ role: "user", content: userPrompt }],
         });
         completionText = completion.text;
@@ -153,7 +155,28 @@ export class GeneratorService {
           reason:
             trimmed.length === 0
               ? "LLM returned an empty response"
-              : "LLM refused to generate a value (note may be empty or off-topic)",
+              : "LLM refused to generate (responded with meta-commentary about the note instead of a value)",
+        });
+        continue;
+      }
+
+      // ---- single_line_text: extra sanity-check on the raw answer
+      //      BEFORE the parser collapses it to one line. Some models
+      //      reply with a paragraph that LOOKS like a description but
+      //      is actually a refusal disguised as text ("The note
+      //      content provided is insufficient to generate a
+      //      summary"). The parser would then write that as the
+      //      description. Detect it the same way we detect a list
+      //      refusal: scan for meta-commentary tokens. ----
+      if (
+        opts.preset.parser === "single_line_text" &&
+        textLooksLikeMetaCommentary(trimmed)
+      ) {
+        result.skippedCount++;
+        result.skipped.push({
+          path: file.path,
+          reason:
+            "LLM returned meta-commentary about the note instead of a value",
         });
         continue;
       }
@@ -318,41 +341,33 @@ export const REFUSAL_SENTINEL = "UNABLE_TO_GENERATE";
 
 /**
  * Heuristic: detect refusal / "can't generate" responses from the LLM.
- * Catches two classes:
- *   1. The model emits our requested sentinel UNABLE_TO_GENERATE.
- *   2. The model ignores the instruction and produces prose-style
- *      refusal: "I cannot...", "Sorry I am unable...", "I need to see
- *      the active note...", "since no note content was shared",
- *      "I'll wait for the note content", "Based on the note content
- *      provided...", "Please share the note content", "Without the
- *      actual note...", plus German variants. Match on prefix OR
- *      anywhere in a short response so list-formatted refusals
- *      ("- I need to see...\n- I'll wait...") still trip.
- * Length cap (600 chars) keeps long, real answers safe.
+ * Catches three classes:
+ *   1. Sentinel hit -- model played by the rules.
+ *   2. Specific prefix or anywhere phrasings the user saw in
+ *      production (legacy patterns + the new "I need to see..." set).
+ *   3. textLooksLikeMetaCommentary -- broader "wrote about the
+ *      task/note instead of the value" detector. Catches paraphrases
+ *      the specific patterns miss.
  */
 export function looksLikeRefusal(text: string): boolean {
   const trimmed = text.trim();
-  // Direct sentinel hit -- model played by the rules.
+  // Direct sentinel hit.
   if (trimmed === REFUSAL_SENTINEL || trimmed.includes(REFUSAL_SENTINEL)) {
     return true;
   }
   const lower = trimmed.toLowerCase();
   if (lower.length > 600) return false; // a long answer is an answer
-  // Prefix patterns (legacy + the new ones the user actually saw).
   const prefixPatterns = [
     /^i (cannot|can't|am unable to|am not able to)\b/,
     /^sorry,? i (cannot|can't|am unable)/,
     /^there is (no|nothing) (content|information|text) (to|that)/,
-    /^the (note|document|file) (is|appears to be) empty/,
+    /^the (note|document|file) (is|appears to be) (empty|too short)/,
     /^cannot generate/,
     /^unable to generate/,
     /^(ich kann|leider kann ich) (das|dies)? ?nicht/,
-    /^die notiz (ist|scheint) leer/,
+    /^die notiz (ist|scheint) (leer|zu kurz)/,
   ];
   if (prefixPatterns.some((re) => re.test(lower))) return true;
-  // Anywhere-in-text patterns: catches list-shaped refusals where
-  // each item is one of these phrasings. The phrases are specific
-  // enough to never appear in a real description or keyword.
   const anywherePatterns = [
     /\bi need to see (the |an? )?(active |original )?note\b/,
     /\bno note content (was|is) (shared|provided|given)\b/,
@@ -363,7 +378,69 @@ export function looksLikeRefusal(text: string): boolean {
     /\bich (brauche|benötige) (den |die )?(note|notiz|inhalt)\b/,
     /\bbitte (teile|schicke|gib mir) (den |die )?(inhalt|note|notiz)\b/,
   ];
-  return anywherePatterns.some((re) => re.test(lower));
+  if (anywherePatterns.some((re) => re.test(lower))) return true;
+  // Broad meta-commentary detector for short prose answers that
+  // talk ABOUT the note/task instead of producing the value. Only
+  // applied when the response is short enough (<300 chars) and
+  // doesn't already look like a real value -- otherwise a real
+  // description that happens to contain the word "note" would
+  // false-positive.
+  if (lower.length <= 300 && textLooksLikeMetaCommentary(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * "The model wrote ABOUT the note/task instead of producing the
+ * value" detector. Specifically targets the failure mode the user
+ * saw on non-empty notes: the LLM writes a sentence like
+ *   "The note content provided is insufficient for a summary."
+ *   "Based on the available context, I cannot derive keywords."
+ *   "Diese Notiz enthaelt zu wenig Informationen fuer eine Zusammenfassung."
+ * which slips past the specific phrasing patterns because the exact
+ * words rotate, but always combines a "subject + meta-verb + about
+ * the input" structure.
+ *
+ * Definition of a hit:
+ *   - text starts with "I/We/The note/The content/The text/The
+ *     document/Note/Diese Notiz/Dieser Inhalt/Der Text/Die
+ *     Information" OR contains any of those followed by a
+ *     meta-verb within 30 chars,
+ *   AND
+ *   - contains at least one of the meta verbs: cannot/can't/unable/
+ *     insufficient/not enough/too short/empty/missing/lacks/lacking/
+ *     does not contain/doesn't contain/need more/needs more/
+ *     please provide/clarify/share/upload/paste/kann nicht/
+ *     reicht nicht/zu wenig/zu kurz/fehlt/keine ausreichende/
+ *     bitte/teile.
+ *
+ * Conservative on long texts -- a 400-char real description that
+ * mentions "the note" in passing does not trigger.
+ */
+export function textLooksLikeMetaCommentary(text: string): boolean {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower.length === 0) return false;
+  if (lower.length > 400) return false;
+  // Subject indicators -- the response starts by talking ABOUT
+  // something rather than producing a value.
+  const subjectPattern = /^(i\b|we\b|please\b|the (note|content|text|document|input|provided)|this (note|content|text|document)|note|diese? (note|notiz|inhalt|text|datei)|dieser (note|notiz|inhalt|text)|der (text|inhalt|input)|die (notiz|information)|das (dokument|file)|bitte\b)/i;
+  if (!subjectPattern.test(trimmed)) return false;
+  const metaVerbPatterns = [
+    /\bcannot\b/, /\bcan(?:'t| not)\b/, /\bunable\b/, /\bnot able\b/,
+    /\binsufficient\b/, /\bnot enough\b/, /\btoo short\b/,
+    /\b(is|appears|seems) (empty|missing|blank)\b/,
+    /\b(lacks|lacking|missing|does(?:n't| not) contain)\b/,
+    /\b(need|require|requires|requires more|more info|more context)\b/,
+    /\bplease (provide|share|paste|upload|attach|clarify)\b/,
+    /\bclarif/, /\bunclear\b/,
+    // German equivalents
+    /\bkann (das |dies |diese )?nicht\b/, /\breicht (nicht|allein nicht) aus\b/,
+    /\bzu (kurz|wenig)\b/, /\b(fehlt|fehlen) (der|die|das|noch)\b/,
+    /\bkeine ausreichend/, /\bbitte (teile|geben|gib|stelle|liefere)\b/,
+  ];
+  return metaVerbPatterns.some((re) => re.test(lower));
 }
 
 /**

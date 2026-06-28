@@ -18,7 +18,7 @@ import {
   type FrontmatterEditorSettings,
 } from "./types/settings";
 import { FrontmatterEditorSettingsTab } from "./ui/settings/SettingsTab";
-import { DEFAULT_PRESETS } from "./types/generators";
+import { DEFAULT_PRESETS, migrateLegacyCustomPrompt } from "./types/generators";
 import { SafeStorageService } from "./auth/SafeStorageService";
 import { GitHubCopilotAuthService } from "./auth/GitHubCopilotAuthService";
 import { ChatGptOAuthService } from "./auth/ChatGptOAuthService";
@@ -169,7 +169,13 @@ export default class FrontmatterEditorPlugin extends Plugin {
       providers: stored?.providers ?? [],
       lastUsedModelByProvider: stored?.lastUsedModelByProvider ?? {},
       presets: this.mergePresets(stored?.presets),
-      customPrompts: stored?.customPrompts ?? [],
+      // Custom prompts: migrate legacy {systemPrompt,userPrompt} pairs
+      // to the new single-string shape so saved templates from before
+      // this version still work. Lossy by design -- the systemPrompt
+      // was always a copy of the guardrail which now lives in code.
+      customPrompts: (stored?.customPrompts as unknown[] | undefined ?? [])
+        .map((c) => migrateLegacyCustomPrompt(c))
+        .filter((c): c is NonNullable<typeof c> => c !== null),
     };
     // Drop the legacy `models` array if it's still in data.json -- the new
     // schema is provider-centric and incompatible with the old per-model

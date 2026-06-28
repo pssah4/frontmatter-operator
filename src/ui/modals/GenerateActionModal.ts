@@ -34,7 +34,6 @@ export class GenerateActionModal extends Modal {
   private promptText: string;
   private selectedPresetId: string | null = null;
   private parser: GeneratorParserId = "single_line_text";
-  private systemPrompt: string;
   private selectedProviderModel: string;
   private statusEl: HTMLElement | null = null;
   private promptInputEl: HTMLTextAreaElement | null = null;
@@ -70,12 +69,10 @@ export class GenerateActionModal extends Modal {
     if (builtIn) {
       this.selectedPresetId = `built:${builtIn.id}`;
       const lang = plugin.settings.generatorLanguage;
-      this.promptText = builtIn.prompts[lang].userPrompt;
-      this.systemPrompt = builtIn.prompts[lang].systemPrompt;
+      this.promptText = builtIn.prompts[lang];
       this.parser = builtIn.parser;
     } else {
       this.promptText = `Generate a concise value for the "${opts.targetProperty}" frontmatter property based on the note content.\n\nNote content:\n{{NOTE_BODY}}`;
-      this.systemPrompt = `Return ONLY the value, no YAML keys, no explanations.`;
     }
 
     // Pre-select default provider+model (last-used per provider sticky).
@@ -282,16 +279,14 @@ export class GenerateActionModal extends Modal {
       const preset = this.plugin.settings.presets.find((p) => p.id === id);
       if (preset) {
         const lang = this.plugin.settings.generatorLanguage;
-        this.promptText = preset.prompts[lang].userPrompt;
-        this.systemPrompt = preset.prompts[lang].systemPrompt;
+        this.promptText = preset.prompts[lang];
         this.parser = preset.parser;
       }
     } else if (this.selectedPresetId.startsWith("custom:")) {
       const id = this.selectedPresetId.slice("custom:".length);
       const tpl = this.plugin.settings.customPrompts.find((p) => p.id === id);
       if (tpl) {
-        this.promptText = tpl.userPrompt;
-        this.systemPrompt = tpl.systemPrompt;
+        this.promptText = tpl.prompt;
         this.parser = tpl.parser;
       }
     }
@@ -306,8 +301,7 @@ export class GenerateActionModal extends Modal {
     const { emptyCustomPrompt } = await import("../../types/generators");
     const tpl: CustomPromptTemplate = emptyCustomPrompt(this.opts.targetProperty);
     tpl.name = name;
-    tpl.systemPrompt = this.systemPrompt;
-    tpl.userPrompt = this.promptText;
+    tpl.prompt = this.promptText;
     tpl.parser = this.parser;
     this.plugin.settings.customPrompts.push(tpl);
     await this.plugin.saveSettings();
@@ -388,8 +382,8 @@ export class GenerateActionModal extends Modal {
       parser: this.parser,
       isBuiltIn: false,
       prompts: {
-        en: { systemPrompt: this.systemPrompt, userPrompt: this.promptText },
-        de: { systemPrompt: this.systemPrompt, userPrompt: this.promptText },
+        en: this.promptText,
+        de: this.promptText,
       },
     };
 

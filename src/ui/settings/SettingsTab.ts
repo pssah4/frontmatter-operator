@@ -263,33 +263,24 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
 
     const lang = this.plugin.settings.generatorLanguage;
 
-    const sysSetting = new Setting(parent)
-      .setName("System prompt")
-      .setDesc("Deterministic guardrail.");
-    sysSetting.controlEl.style.display = "block";
-    sysSetting.controlEl.style.width = "100%";
-    const sysTa = sysSetting.controlEl.createEl("textarea", {
+    // Single prompt per property per language. The fixed safety
+    // guardrail (output-only policy + UNABLE_TO_GENERATE sentinel)
+    // is non-user-editable and prepended automatically by the
+    // GeneratorService -- see types/generators.ts GENERATOR_GUARDRAIL.
+    const promptSetting = new Setting(parent)
+      .setName("Prompt")
+      .setDesc(
+        "Instruction sent to the LLM per note. Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}. A fixed safety guardrail (refusal sentinel, output-only policy) is appended automatically; you don't need to write it yourself.",
+      );
+    promptSetting.controlEl.style.display = "block";
+    promptSetting.controlEl.style.width = "100%";
+    const promptTa = promptSetting.controlEl.createEl("textarea", {
       cls: "fm-editor-generator-textarea",
-      text: preset.prompts[lang].systemPrompt,
+      text: preset.prompts[lang],
     });
-    sysTa.rows = 6;
-    sysTa.addEventListener("change", async () => {
-      preset.prompts[lang].systemPrompt = sysTa.value;
-      await this.plugin.saveSettings();
-    });
-
-    const userSetting = new Setting(parent)
-      .setName("User prompt")
-      .setDesc("Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}.");
-    userSetting.controlEl.style.display = "block";
-    userSetting.controlEl.style.width = "100%";
-    const userTa = userSetting.controlEl.createEl("textarea", {
-      cls: "fm-editor-generator-textarea",
-      text: preset.prompts[lang].userPrompt,
-    });
-    userTa.rows = 10;
-    userTa.addEventListener("change", async () => {
-      preset.prompts[lang].userPrompt = userTa.value;
+    promptTa.rows = 14;
+    promptTa.addEventListener("change", async () => {
+      preset.prompts[lang] = promptTa.value;
       await this.plugin.saveSettings();
     });
   }

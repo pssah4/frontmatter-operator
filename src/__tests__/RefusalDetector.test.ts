@@ -13,6 +13,7 @@ import {
   REFUSAL_SENTINEL,
   listLooksLikeRefusal,
   looksLikeRefusal,
+  textLooksLikeMetaCommentary,
 } from "../services/generator/GeneratorService";
 
 describe("looksLikeRefusal -- sentinel", () => {
@@ -197,5 +198,114 @@ describe("listLooksLikeRefusal", () => {
         "semantic-search",
       ]),
     ).toBe(false);
+  });
+});
+
+describe("textLooksLikeMetaCommentary -- catches paraphrased refusals on non-empty notes", () => {
+  it("'The note content provided is insufficient...'", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "The note content provided is insufficient to generate a summary.",
+      ),
+    ).toBe(true);
+  });
+
+  it("'The note appears to be too short...'", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "The note appears to be too short for a meaningful description.",
+      ),
+    ).toBe(true);
+  });
+
+  it("'I cannot derive keywords from this content'", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "I cannot derive keywords from this content alone.",
+      ),
+    ).toBe(true);
+  });
+
+  it("'The content does not contain enough information'", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "The content does not contain enough information to summarise.",
+      ),
+    ).toBe(true);
+  });
+
+  it("'Please provide more context for this note'", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "Please provide more context for this note before I can answer.",
+      ),
+    ).toBe(true);
+  });
+
+  it("German: 'Diese Notiz enthaelt zu wenig Informationen'", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "Diese Notiz enthält zu wenig Informationen für eine Zusammenfassung.",
+      ),
+    ).toBe(true);
+  });
+
+  it("German: 'Der Inhalt reicht nicht aus'", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "Der Inhalt reicht nicht aus, um sinnvolle Keywords zu erzeugen.",
+      ),
+    ).toBe(true);
+  });
+
+  it("a real one-line description passes through", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "Explores how to integrate non-linear writing into a daily Obsidian workflow.",
+      ),
+    ).toBe(false);
+  });
+
+  it("a real description that mentions 'the note' in passing passes", () => {
+    expect(
+      textLooksLikeMetaCommentary(
+        "Maps the historical use of non-linear writing tools.",
+      ),
+    ).toBe(false);
+  });
+
+  it("a description starting with 'I' as a personal pronoun but no meta-verb passes", () => {
+    // Real summary that happens to start with "I" -- no meta verb,
+    // so not a refusal.
+    expect(
+      textLooksLikeMetaCommentary("I outline three principles for daily review."),
+    ).toBe(false);
+  });
+
+  it("a long real description with > 400 chars is never a refusal", () => {
+    const long = "The note describes how to build a daily review habit. ".repeat(8);
+    expect(textLooksLikeMetaCommentary(long)).toBe(false);
+  });
+
+  it("empty string is not a refusal (caller handles emptiness separately)", () => {
+    expect(textLooksLikeMetaCommentary("")).toBe(false);
+  });
+});
+
+describe("looksLikeRefusal integration -- the meta-commentary cases all roll up", () => {
+  it("paraphrased refusal also caught by looksLikeRefusal", () => {
+    expect(
+      looksLikeRefusal(
+        "The note content provided is insufficient to generate a summary.",
+      ),
+    ).toBe(true);
+  });
+
+  it("German meta-commentary caught by looksLikeRefusal", () => {
+    expect(
+      looksLikeRefusal(
+        "Der Inhalt reicht nicht aus für eine Zusammenfassung.",
+      ),
+    ).toBe(true);
   });
 });
