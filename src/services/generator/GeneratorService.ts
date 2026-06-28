@@ -211,11 +211,38 @@ export class GeneratorService {
         continue;
       }
 
+      // Post-parse normalisation for the keywords preset: force
+      // lowercase + cap to 5 entries, regardless of what the LLM
+      // produced. The prompt asks for this, but cheaper models
+      // occasionally ship "AI-Agent" or 8 keywords; this is the
+      // last-mile guarantee so the saved tag is always
+      // ["ai-agent", "non-linear-writing", ...] -- normalised exactly
+      // the same way every time, scoped to the keywords preset only
+      // (other list_string presets like "aliases" need to keep their
+      // original casing).
+      let valueToWrite: unknown = parsed.value;
+      if (
+        opts.preset.id === "keywords" &&
+        opts.preset.parser === "list_string" &&
+        Array.isArray(valueToWrite)
+      ) {
+        const seen = new Set<string>();
+        const normalised: string[] = [];
+        for (const item of valueToWrite as unknown[]) {
+          const s = String(item).toLowerCase().trim();
+          if (!s || seen.has(s)) continue;
+          seen.add(s);
+          normalised.push(s);
+          if (normalised.length >= 5) break;
+        }
+        valueToWrite = normalised;
+      }
+
       try {
         await this.applyToFrontmatter(
           file,
           opts.preset.targetProperty,
-          parsed.value,
+          valueToWrite,
           opts.preset.parser,
           conflictMode,
         );

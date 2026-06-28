@@ -201,112 +201,123 @@ Contenuto della nota:
 };
 
 const KEYWORDS_PROMPTS: Record<GeneratorLanguage, string> = {
-  en: `Produce 5 to 10 keywords for the note. The keywords should help the author recall the note later (associations, memory cues, meta-topics, semantics) and improve semantic search recall.
+  en: `Produce 3 to 5 keywords for the note. The keywords should help the author recall the note later (associations, memory cues, meta-topics, semantics) and improve semantic search recall.
 
 Format rules:
 - Output a plain YAML list, one item per line, starting with "- ".
-- Hyphenate multi-word concepts ("AI-agent", "non-linear-writing"), maximum 2 connected words per keyword.
-- Mix English and the note's original language. If a technical term is more common in English (e.g. "AI-agent" instead of a localized form), prefer the English form.
+- All keywords MUST be lowercase. No capital letters anywhere, not even for acronyms or proper nouns ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- Hyphenate multi-word concepts, maximum 2 connected words per keyword.
+- Mix English and the note's original language. If a technical term is more common in English (e.g. "ai-agent" instead of a localized form), prefer the English form -- still lowercase.
 - Output ONLY the dashed list. No keys, no introduction, no prose.
 
 Note content:
 {{NOTE_BODY}}`,
-  de: `Erzeuge 5 bis 10 Keywords für die Notiz. Die Keywords sollen helfen, die Notiz später wiederzufinden (Assoziationen, Erinnerungshilfen, Meta-Themen, Semantik) und die semantische Suche verbessern.
+  de: `Erzeuge 3 bis 5 Keywords für die Notiz. Die Keywords sollen helfen, die Notiz später wiederzufinden (Assoziationen, Erinnerungshilfen, Meta-Themen, Semantik) und die semantische Suche verbessern.
 
 Format-Regeln:
 - Ausgabe als reine YAML-Liste, ein Eintrag pro Zeile, beginnend mit "- ".
-- Mehr-Wort-Begriffe per Bindestrich verbinden ("AI-Agent", "non-linear-writing"), maximal 2 verbundene Wörter pro Keyword.
-- Deutsch und Englisch mischen. Wenn ein Fachbegriff im Englischen gebräuchlicher ist (z.B. "AI-Agent" statt lokalisierter Form), die englische Variante bevorzugen.
+- Alle Keywords MÜSSEN kleingeschrieben sein. Keine Großbuchstaben, auch nicht bei Akronymen oder Eigennamen ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- Mehr-Wort-Begriffe per Bindestrich verbinden, maximal 2 verbundene Wörter pro Keyword.
+- Deutsch und Englisch mischen. Wenn ein Fachbegriff im Englischen gebräuchlicher ist (z.B. "ai-agent" statt lokalisierter Form), die englische Variante bevorzugen -- ebenfalls kleingeschrieben.
 - Gib NUR die Bindestrich-Liste aus. Keine Keys, keine Einleitung, keine Prosa.
 
 Note-Inhalt:
 {{NOTE_BODY}}`,
-  fr: `Produis 5 à 10 mots-clés pour la note. Les mots-clés doivent aider l'auteur à se souvenir de la note plus tard (associations, indices mnémoniques, méta-sujets, sémantique) et améliorer la recherche sémantique.
+  fr: `Produis 3 à 5 mots-clés pour la note. Les mots-clés doivent aider l'auteur à se souvenir de la note plus tard (associations, indices mnémoniques, méta-sujets, sémantique) et améliorer la recherche sémantique.
 
 Règles de format :
 - Sortie en liste YAML brute, un élément par ligne, commençant par "- ".
-- Concepts multi-mots avec traits d'union ("AI-agent", "non-linear-writing"), maximum 2 mots reliés par mot-clé.
-- Mélange français et anglais. Si un terme technique est plus courant en anglais (ex. "AI-agent" au lieu de "agent-IA"), préfère la forme anglaise.
+- Tous les mots-clés DOIVENT être en minuscules. Pas de majuscules, même pour les acronymes ou les noms propres ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- Concepts multi-mots avec traits d'union, maximum 2 mots reliés par mot-clé.
+- Mélange français et anglais. Si un terme technique est plus courant en anglais (ex. "ai-agent" au lieu de "agent-ia"), préfère la forme anglaise -- toujours en minuscules.
 - Sortie UNIQUEMENT la liste à tirets. Pas de clés, pas d'introduction, pas de prose.
 
 Contenu de la note :
 {{NOTE_BODY}}`,
-  es: `Produce de 5 a 10 palabras clave para la nota. Las palabras clave deben ayudar al autor a recordar la nota más tarde (asociaciones, pistas mnemotécnicas, meta-temas, semántica) y mejorar la búsqueda semántica.
+  es: `Produce de 3 a 5 palabras clave para la nota. Las palabras clave deben ayudar al autor a recordar la nota más tarde (asociaciones, pistas mnemotécnicas, meta-temas, semántica) y mejorar la búsqueda semántica.
 
 Reglas de formato:
 - Salida como lista YAML simple, un elemento por línea, comenzando con "- ".
-- Conceptos de varias palabras con guiones ("AI-agent", "non-linear-writing"), máximo 2 palabras conectadas por palabra clave.
-- Mezcla español e inglés. Si un término técnico es más común en inglés (p. ej. "AI-agent" en lugar de la forma localizada), prefiere la forma inglesa.
+- Todas las palabras clave DEBEN estar en minúsculas. Sin mayúsculas, ni siquiera para acrónimos o nombres propios ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- Conceptos de varias palabras con guiones, máximo 2 palabras conectadas por palabra clave.
+- Mezcla español e inglés. Si un término técnico es más común en inglés (p. ej. "ai-agent" en lugar de la forma localizada), prefiere la forma inglesa -- siempre en minúsculas.
 - Salida ÚNICAMENTE la lista con guiones. Sin claves, sin introducción, sin prosa.
 
 Contenido de la nota:
 {{NOTE_BODY}}`,
-  it: `Produci da 5 a 10 parole chiave per la nota. Le parole chiave devono aiutare l'autore a ricordare la nota in seguito (associazioni, indizi mnemonici, meta-argomenti, semantica) e migliorare la ricerca semantica.
+  it: `Produci da 3 a 5 parole chiave per la nota. Le parole chiave devono aiutare l'autore a ricordare la nota in seguito (associazioni, indizi mnemonici, meta-argomenti, semantica) e migliorare la ricerca semantica.
 
 Regole di formato:
 - Output come lista YAML semplice, un elemento per riga, che inizia con "- ".
-- Concetti di più parole con trattini ("AI-agent", "non-linear-writing"), massimo 2 parole collegate per parola chiave.
-- Mescola italiano e inglese. Se un termine tecnico è più comune in inglese (es. "AI-agent" invece della forma localizzata), preferisci la forma inglese.
+- Tutte le parole chiave DEVONO essere in minuscolo. Niente maiuscole, nemmeno per acronimi o nomi propri ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- Concetti di più parole con trattini, massimo 2 parole collegate per parola chiave.
+- Mescola italiano e inglese. Se un termine tecnico è più comune in inglese (es. "ai-agent" invece della forma localizzata), preferisci la forma inglese -- sempre in minuscolo.
 - Output SOLO la lista con trattini. Niente chiavi, niente introduzione, niente prosa.
 
 Contenuto della nota:
 {{NOTE_BODY}}`,
-  ru: `Создайте от 5 до 10 ключевых слов для заметки. Ключевые слова должны помочь автору вспомнить заметку позже (ассоциации, мнемонические подсказки, мета-темы, семантика) и улучшить семантический поиск.
+  ru: `Создайте от 3 до 5 ключевых слов для заметки. Ключевые слова должны помочь автору вспомнить заметку позже (ассоциации, мнемонические подсказки, мета-темы, семантика) и улучшить семантический поиск.
 
 Правила формата:
 - Вывод в виде простого YAML-списка, по одному элементу на строку, начиная с "- ".
-- Многословные концепции через дефис ("AI-agent", "non-linear-writing"), максимум 2 связанных слова на ключевое слово.
-- Смешивайте русский и английский. Если технический термин чаще используется на английском (например, "AI-agent" вместо локализованной формы), предпочтите английскую форму.
+- Все ключевые слова ДОЛЖНЫ быть в нижнем регистре. Никаких заглавных букв, даже для аббревиатур или имён собственных ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- Многословные концепции через дефис, максимум 2 связанных слова на ключевое слово.
+- Смешивайте русский и английский. Если технический термин чаще используется на английском (например, "ai-agent" вместо локализованной формы), предпочтите английскую форму -- также в нижнем регистре.
 - Выводите ТОЛЬКО список с дефисами. Без ключей, без введения, без прозы.
 
 Содержание заметки:
 {{NOTE_BODY}}`,
-  ar: `أنتج من 5 إلى 10 كلمات مفتاحية للملاحظة. يجب أن تساعد الكلمات المفتاحية المؤلف على تذكر الملاحظة لاحقاً (روابط، تلميحات للذاكرة، موضوعات شاملة، دلالات) وتحسين البحث الدلالي.
+  ar: `أنتج من 3 إلى 5 كلمات مفتاحية للملاحظة. يجب أن تساعد الكلمات المفتاحية المؤلف على تذكر الملاحظة لاحقاً (روابط، تلميحات للذاكرة، موضوعات شاملة، دلالات) وتحسين البحث الدلالي.
 
 قواعد التنسيق:
 - الإخراج كقائمة YAML بسيطة، عنصر واحد لكل سطر، يبدأ بـ "- ".
-- المفاهيم متعددة الكلمات بالشرطات ("AI-agent", "non-linear-writing")، بحد أقصى كلمتين متصلتين لكل كلمة مفتاحية.
-- اخلط العربية والإنجليزية. إذا كان مصطلح تقني أكثر شيوعاً بالإنجليزية (مثل "AI-agent" بدلاً من الصيغة المُحلية)، فضّل الصيغة الإنجليزية.
+- جميع الكلمات الإنجليزية يجب أن تكون بأحرف صغيرة بالكامل. لا أحرف كبيرة، حتى للاختصارات أو أسماء العلم ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- المفاهيم متعددة الكلمات بالشرطات، بحد أقصى كلمتين متصلتين لكل كلمة مفتاحية.
+- اخلط العربية والإنجليزية. إذا كان مصطلح تقني أكثر شيوعاً بالإنجليزية (مثل "ai-agent" بدلاً من الصيغة المُحلية)، فضّل الصيغة الإنجليزية -- أيضاً بأحرف صغيرة.
 - أخرج فقط القائمة بالشرطات. لا مفاتيح، لا مقدمة، لا نثر.
 
 محتوى الملاحظة:
 {{NOTE_BODY}}`,
-  zh: `为该笔记生成 5 到 10 个关键词。关键词应帮助作者日后回忆这条笔记（关联、记忆线索、元主题、语义），并提升语义搜索的召回率。
+  zh: `为该笔记生成 3 到 5 个关键词。关键词应帮助作者日后回忆这条笔记（关联、记忆线索、元主题、语义），并提升语义搜索的召回率。
 
 格式规则：
 - 输出为纯 YAML 列表，每行一个条目，以 "- " 开头。
-- 多词概念使用连字符连接（"AI-agent"、"non-linear-writing"），每个关键词最多 2 个连接词。
-- 中英混合。如果技术术语在英语中更常用（如 "AI-agent" 而非本地化形式），优先使用英语形式。
+- 所有英文关键词必须全部小写。即使是缩写或专有名词也不要使用大写字母（"ai-agent"、"non-linear-writing"、"rag"、"obsidian-workflow"）。
+- 多词概念使用连字符连接，每个关键词最多 2 个连接词。
+- 中英混合。如果技术术语在英语中更常用（如 "ai-agent" 而非本地化形式），优先使用英语形式 -- 同样保持小写。
 - 仅输出带连字符的列表。不要键名、不要引言、不要散文。
 
 笔记内容：
 {{NOTE_BODY}}`,
-  ko: `이 노트에 대해 5~10개의 키워드를 생성하세요. 키워드는 작성자가 노트를 나중에 떠올릴 수 있도록 돕고(연상, 기억 단서, 메타 주제, 의미론) 의미 기반 검색을 개선해야 합니다.
+  ko: `이 노트에 대해 3~5개의 키워드를 생성하세요. 키워드는 작성자가 노트를 나중에 떠올릴 수 있도록 돕고(연상, 기억 단서, 메타 주제, 의미론) 의미 기반 검색을 개선해야 합니다.
 
 형식 규칙:
 - 출력은 일반 YAML 목록, 한 줄에 한 항목, "- "로 시작.
-- 다중 단어 개념은 하이픈으로 연결("AI-agent", "non-linear-writing"), 키워드당 최대 2개 연결 단어.
-- 한국어와 영어를 섞으세요. 기술 용어가 영어에서 더 흔하면(예: 현지화된 형태 대신 "AI-agent") 영어 형태를 선호.
+- 모든 영문 키워드는 반드시 소문자로 작성하세요. 약어나 고유명사라도 대문자를 사용하지 마세요("ai-agent", "non-linear-writing", "rag", "obsidian-workflow").
+- 다중 단어 개념은 하이픈으로 연결, 키워드당 최대 2개 연결 단어.
+- 한국어와 영어를 섞으세요. 기술 용어가 영어에서 더 흔하면(예: 현지화된 형태 대신 "ai-agent") 영어 형태를 선호 -- 역시 소문자.
 - 하이픈 목록만 출력. 키 없음, 서론 없음, 산문 없음.
 
 노트 내용:
 {{NOTE_BODY}}`,
-  ja: `このノートのキーワードを 5～10 個生成してください。キーワードは、著者が後でノートを思い出すのに役立つもの（連想、記憶手がかり、メタトピック、意味論）であり、セマンティック検索の再現率を高めるものであるべきです。
+  ja: `このノートのキーワードを 3～5 個生成してください。キーワードは、著者が後でノートを思い出すのに役立つもの（連想、記憶手がかり、メタトピック、意味論）であり、セマンティック検索の再現率を高めるものであるべきです。
 
 形式ルール：
 - 出力はプレーンな YAML リスト、1 行に 1 項目、"- " で開始。
-- 複数語の概念はハイフンで連結（"AI-agent"、"non-linear-writing"）、キーワードあたり最大 2 つの連結語。
-- 日本語と英語を混在させる。技術用語が英語で一般的な場合（ローカライズ形式の代わりに "AI-agent" など）、英語形式を優先。
+- 英語のキーワードはすべて小文字で書いてください。略語や固有名詞であっても大文字を使わないでください（"ai-agent"、"non-linear-writing"、"rag"、"obsidian-workflow"）。
+- 複数語の概念はハイフンで連結、キーワードあたり最大 2 つの連結語。
+- 日本語と英語を混在させる。技術用語が英語で一般的な場合（ローカライズ形式の代わりに "ai-agent" など）、英語形式を優先 -- これも小文字。
 - ハイフン付きリストのみ出力。キーなし、前置きなし、散文なし。
 
 ノート内容：
 {{NOTE_BODY}}`,
-  hi: `इस नोट के लिए 5 से 10 कीवर्ड बनाएँ। कीवर्ड लेखक को बाद में नोट को याद रखने में मदद करने (संगति, स्मृति-संकेत, मेटा-विषय, अर्थशास्त्र) और सिमेंटिक खोज को बेहतर बनाने वाले होने चाहिए।
+  hi: `इस नोट के लिए 3 से 5 कीवर्ड बनाएँ। कीवर्ड लेखक को बाद में नोट को याद रखने में मदद करने (संगति, स्मृति-संकेत, मेटा-विषय, अर्थशास्त्र) और सिमेंटिक खोज को बेहतर बनाने वाले होने चाहिए।
 
 प्रारूप नियम:
 - आउटपुट सादे YAML सूची के रूप में, प्रति पंक्ति एक प्रविष्टि, "- " से शुरू।
-- बहु-शब्द अवधारणाओं को हाइफ़न से जोड़ें ("AI-agent", "non-linear-writing"), प्रति कीवर्ड अधिकतम 2 जुड़े शब्द।
-- हिन्दी और अंग्रेज़ी मिलाएँ। यदि कोई तकनीकी शब्द अंग्रेज़ी में अधिक प्रचलित हो (जैसे स्थानीयकृत रूप के बजाय "AI-agent"), तो अंग्रेज़ी रूप को प्राथमिकता दें।
+- सभी अंग्रेज़ी कीवर्ड पूरी तरह छोटे अक्षरों (lowercase) में लिखें। संक्षिप्ताक्षर या व्यक्तिवाचक संज्ञा के लिए भी बड़े अक्षर नहीं ("ai-agent", "non-linear-writing", "rag", "obsidian-workflow")।
+- बहु-शब्द अवधारणाओं को हाइफ़न से जोड़ें, प्रति कीवर्ड अधिकतम 2 जुड़े शब्द।
+- हिन्दी और अंग्रेज़ी मिलाएँ। यदि कोई तकनीकी शब्द अंग्रेज़ी में अधिक प्रचलित हो (जैसे स्थानीयकृत रूप के बजाय "ai-agent"), तो अंग्रेज़ी रूप को प्राथमिकता दें -- वह भी छोटे अक्षरों में।
 - केवल हाइफ़न सूची आउटपुट करें। कोई कुंजी नहीं, कोई परिचय नहीं, कोई गद्य नहीं।
 
 नोट सामग्री:
@@ -531,7 +542,7 @@ export const DEFAULT_KEYWORDS: GeneratorPreset = {
   displayName: "Keywords / tags",
   targetProperty: "tags",
   parser: "list_string",
-  description: "Adds 5-10 hyphenated keywords to `tags` (merged with existing).",
+  description: "Adds 3-5 lowercase hyphenated keywords to `tags` (merged with existing).",
   isBuiltIn: true,
   prompts: KEYWORDS_PROMPTS,
 };
