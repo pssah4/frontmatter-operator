@@ -472,7 +472,21 @@ async function fetchBedrock(draft: ProviderConfig): Promise<FetchResult> {
     seen.add(m.id);
     return true;
   });
-  return { ok: true, models: unique.sort(byBedrockPriority) };
+  // Strict gate: only return models whose family is in VO's curated
+  // MODEL_SUGGESTIONS.bedrock set. AWS's ListFoundationModels returns
+  // ~50 models per region INCLUDING ids the account has no access to
+  // (every model AWS exposes, regardless of subscription). The Default-
+  // Model picker should only show ids that are likely callable. The
+  // curated set is exactly the production-tested lineup VO ships --
+  // every entry has been verified Converse-compatible and broadly
+  // available across enabled accounts. Fallback: if filtering empties
+  // the list (extremely unusual region with no curated overlap), keep
+  // the raw list rather than ship an empty picker.
+  const curated = unique.filter((m) =>
+    SUGGESTED_BEDROCK_FAMILIES.has(bedrockFamilyKey(m.id)),
+  );
+  const final = curated.length > 0 ? curated : unique;
+  return { ok: true, models: final.sort(byBedrockPriority) };
 }
 
 /**

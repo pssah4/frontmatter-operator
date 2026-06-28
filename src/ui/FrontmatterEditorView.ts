@@ -335,6 +335,28 @@ export class FrontmatterEditorView extends ItemView {
 
   // ============================================================ WHEN BAR
 
+  /**
+   * Re-render JUST the WHEN bar without throwing away the table or the
+   * action bar. Used by the per-row checkbox handler so a tick
+   * immediately materialises (or removes) the selection chip in the
+   * WHEN bar -- without that, the chip only appeared on the next full
+   * render() and felt like a separate surface.
+   */
+  private refreshWhenBar(): void {
+    const old = this.containerEl.querySelector(".fm-editor-when-section");
+    if (!old) return;
+    const parent = old.parentElement;
+    if (!parent) return;
+    // Build the new section into a detached fragment first so we can
+    // swap atomically and preserve sibling order (the rule summary,
+    // table, action bar must stay below the WHEN section).
+    const host = document.createElement("div");
+    this.renderWhenBar(host as unknown as HTMLElement);
+    const fresh = host.firstElementChild;
+    if (fresh) parent.insertBefore(fresh, old);
+    old.remove();
+  }
+
   private renderWhenBar(parent: HTMLElement): void {
     const section = parent.createDiv({ cls: "fm-editor-section fm-editor-when-section" });
     const head = section.createDiv({ cls: "fm-editor-section-head" });
@@ -402,49 +424,68 @@ export class FrontmatterEditorView extends ItemView {
    * bar as "Note in [a, b, c]" while at least one row is ticked; clicking the
    * remove button clears the selection (which also collapses the chip).
    */
+  /**
+   * Render the ticked-rows chip in the WHEN bar so it visually matches
+   * every other condition row -- same `fm-editor-condition` container
+   * class, same chip-prop/chip-op/chip-val cells the regular condition
+   * uses, same combinator slot. The user reads "selected notes" as
+   * just another WHEN constraint, not a separate "Where" thing.
+   *
+   * The chip is read-only: the user controls it by ticking checkboxes
+   * in the table, not by editing dropdowns. The clear-icon (X) drops
+   * the selection and re-renders the whole view.
+   */
   private renderNoteSelectionChip(parent: HTMLElement, index: number): void {
-    const row = parent.createDiv({
-      cls: "fm-editor-condition fm-editor-condition-derived",
-    });
-
-    if (index === 0) {
-      row.createSpan({
-        text: "WHERE",
-        cls: "fm-editor-condition-combinator",
-      });
-    } else {
-      row.createSpan({
-        text: "AND",
-        cls: "fm-editor-condition-combinator",
-      });
-    }
+    // Use the same base class as renderConditionRow so styles.css gives
+    // both the same border, padding, background, hover. No -derived
+    // modifier -- the chip IS a normal WHEN condition.
+    const row = parent.createDiv({ cls: "fm-editor-condition" });
 
     row.createSpan({
-      cls: "fm-editor-rule-summary-prop",
+      text: index === 0 ? "WHERE" : "AND",
+      cls: "fm-editor-condition-combinator",
+    });
+
+    // Property cell -- match the chip-prop-wrap shell so it gets the
+    // same chip styling as the property Combobox in regular rows.
+    const propWrap = row.createDiv({ cls: "fm-editor-chip-prop-wrap" });
+    const propChip = propWrap.createSpan({ cls: "fm-editor-chip" });
+    setIcon(propChip.createSpan({ cls: "fm-editor-chip-icon" }), "file-text");
+    propChip.createSpan({
+      cls: "fm-editor-chip-label",
       text: "Note",
     });
-    row.createSpan({
-      cls: "fm-editor-rule-summary-op",
-      text: this.selectedPaths.size === 1 ? "equals" : "in",
-    });
 
+    // Operator cell -- styled as the regular operator <select> would
+    // be (matches .fm-editor-condition-op).
+    const opEl = row.createEl("span", {
+      cls: "fm-editor-condition-op fm-editor-condition-op-static",
+    });
+    opEl.setText(this.selectedPaths.size === 1 ? "equals" : "in");
+
+    // Value cell -- count + preview, title attribute carries the full
+    // list for hover. Same chip-val class the rule summary uses so
+    // user gets the same monospace value style.
     const paths = Array.from(this.selectedPaths);
     const preview = paths
       .slice(0, 3)
       .map((p) => p.split("/").pop()!.replace(/\.md$/, ""))
       .join(", ");
     const more = paths.length > 3 ? `, +${paths.length - 3}` : "";
-    const valueEl = row.createSpan({
-      cls: "fm-editor-rule-summary-val",
-      text: `"${preview}${more}"`,
+    const valWrap = row.createDiv({ cls: "fm-editor-chip-val-wrap" });
+    const valChip = valWrap.createSpan({ cls: "fm-editor-chip" });
+    valChip.createSpan({
+      cls: "fm-editor-chip-count",
+      text: `${paths.length}`,
     });
-    valueEl.title = paths.join("\n");
+    const valText = valChip.createSpan({
+      cls: "fm-editor-chip-label",
+      text: paths.length === 1 ? preview : `${preview}${more}`,
+    });
+    valText.title = paths.join("\n");
 
-    const badge = row.createSpan({ cls: "fm-editor-condition-badge" });
-    setIcon(badge, "file-text");
-    badge.createSpan({ text: ` ${paths.length}` });
-    badge.title = `${paths.length} ticked note${paths.length === 1 ? "" : "s"}`;
-
+    // Action cell -- mirror renderConditionRow's actions div so the
+    // X-button lands in the same spot as a regular condition's remove.
     const actions = row.createDiv({ cls: "fm-editor-condition-actions" });
     const remove = this.makeIconButton(
       actions,
@@ -851,6 +892,14 @@ export class FrontmatterEditorView extends ItemView {
           tr.removeClass("is-selected");
         }
         this.updateActionBarHint();
+        // Selection IS a WHEN condition -- when the user ticks even
+        // one box, redraw the WHEN bar so the chip appears (or
+        // disappears on the last untick) in the same row as the
+        // global filters. Previously only the bottom action-bar
+        // updated, which made the selection feel like a separate
+        // surface rather than another WHEN constraint.
+        this.refreshWhenBar();
+        this.updateRuleSummary();
       });
 
       const noteTd = tr.createEl("td", { cls: "fm-editor-col-note" });

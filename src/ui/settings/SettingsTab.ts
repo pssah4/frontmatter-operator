@@ -5,12 +5,28 @@ import {
   GENERATOR_LANGUAGES,
   DEFAULT_PRESETS,
 } from "../../types/generators";
-import {
-  PROVIDER_COLORS,
-  PROVIDER_LABELS,
-  type ProviderConfig,
-} from "../../types/llm";
+import { PROVIDER_LABELS, type ProviderConfig } from "../../types/llm";
 import { ProviderDetailModal } from "./ProviderDetailModal";
+
+/**
+ * Per-row credentials probe. Mirrors VO providerHasCredentials
+ * (src/ui/settings/ProvidersTab.ts:272-286). The check-icon / minus
+ * column reads this -- a row with a check icon "has a credential";
+ * minus = "no credential set".
+ */
+function providerHasCredentials(p: ProviderConfig): boolean {
+  if (p.type === "ollama" || p.type === "lmstudio" || p.type === "custom") {
+    return !!p.baseUrl?.trim();
+  }
+  if (p.type === "bedrock") {
+    if (p.awsApiKey?.trim()) return true;
+    return !!(p.awsAccessKey?.trim() && p.awsSecretKey?.trim());
+  }
+  if (p.type === "github-copilot" || p.type === "chatgpt-oauth") {
+    return true; // OAuth state is tracked on the plugin, not the row -- VO does the same
+  }
+  return !!p.apiKey?.trim();
+}
 
 export class FrontmatterEditorSettingsTab extends PluginSettingTab {
   constructor(app: App, private plugin: FrontmatterEditorPlugin) {
@@ -36,103 +52,131 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
       text: "One provider account per row. The AI chat (Generate with AI from a column header) picks the provider and concrete model at run time. 12 provider types are supported.",
     });
 
-    if (this.plugin.settings.providers.length === 0) {
-      containerEl.createDiv({
-        cls: "fm-editor-condition-empty",
-        text: "No providers configured yet. Click + Add provider to start.",
+    // VO-style 5-column grid: Provider | Key | Enable | Default | Actions.
+    // Same DOM + CSS class set as Vault Operator's ProvidersTab so the
+    // look + feel stays identical (model-table providers-table).
+    const table = containerEl.createDiv({
+      cls: "model-table providers-table",
+    });
+    const header = table.createDiv({ cls: "model-row model-row-header" });
+    header.createDiv({ cls: "mc-name", text: "Provider" });
+    header.createDiv({ cls: "mc-key", text: "Key" });
+    header.createDiv({ cls: "mc-enable", text: "Enable" });
+    header.createDiv({ cls: "mc-default", text: "Default" });
+    header.createDiv({ cls: "mc-actions" });
+
+    const providers = this.plugin.settings.providers ?? [];
+    if (providers.length === 0) {
+      table.createDiv({
+        cls: "model-table-empty",
+        text: "No providers configured yet. Click + Add provider below.",
       });
+    } else {
+      for (const p of providers) this.renderProviderRow(table, p);
     }
 
-    const table = containerEl.createDiv({ cls: "fm-editor-models-table" });
-    for (const p of this.plugin.settings.providers) {
-      this.renderProviderRow(table, p);
-    }
-
-    new Setting(containerEl).addButton((b) => {
-      b.setCta()
-        .setButtonText("+ Add provider")
-        .onClick(() => {
-          new ProviderDetailModal(this.app, this.plugin, null, () =>
-            this.display(),
-          ).open();
-        });
+    const footer = containerEl.createDiv({ cls: "model-table-footer" });
+    const addBtn = footer.createEl("button", {
+      cls: "mod-cta model-add-btn",
+      text: "+ Add provider",
+    });
+    addBtn.addEventListener("click", () => {
+      new ProviderDetailModal(this.app, this.plugin, null, () =>
+        this.display(),
+      ).open();
     });
   }
 
   private renderProviderRow(parent: HTMLElement, provider: ProviderConfig): void {
-    const row = parent.createDiv({ cls: "fm-editor-model-row" });
-    if (!provider.enabled) row.addClass("is-disabled");
-    if (provider.id === this.plugin.settings.defaultProviderId) {
-      row.addClass("is-default");
+    const isActive = provider.id === this.plugin.settings.defaultProviderId;
+    const rowCls = [
+      "model-row",
+      isActive ? "model-row-active" : "",
+      !provider.enabled ? "model-row-disabled" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const row = parent.createDiv(rowCls);
+
+    // ---- Provider name + sub-line (model count) ----
+    const nameEl = row.createDiv("mc-name");
+    nameEl.createSpan({
+      text: provider.displayName || PROVIDER_LABELS[provider.type],
+      cls: "mc-name-text",
+    });
+    const sub = this.rowSummary(provider);
+    if (sub) {
+      const subEl = nameEl.createDiv({ cls: "mc-name-sub" });
+      subEl.setText(sub);
     }
 
-    const badge = row.createDiv({ cls: "fm-editor-model-badge" });
-    badge.setText(PROVIDER_LABELS[provider.type]);
-    badge.style.setProperty(
-      "background-color",
-      PROVIDER_COLORS[provider.type] ?? "#999",
-    );
+    // ---- Key indicator (check / minus icon) ----
+    const hasKey = providerHasCredentials(provider);
+    const keyEl = row.createDiv("mc-key");
+    const keyIcon = keyEl.createSpan({ cls: "mc-key-icon" });
+    setIcon(keyIcon, hasKey ? "check" : "minus");
+    keyEl.addClass(hasKey ? "mc-key-ok" : "mc-key-missing");
 
-    const main = row.createDiv({ cls: "fm-editor-model-main" });
-    main.createDiv({
-      cls: "fm-editor-model-name",
-      text: provider.displayName,
+    // ---- Enable toggle (custom checkbox + track) ----
+    const enableEl = row.createDiv("mc-enable");
+    const toggleLabel = enableEl.createEl("label", { cls: "mc-toggle" });
+    const toggleInput = toggleLabel.createEl("input", {
+      attr: { type: "checkbox" },
     });
-    const cached = provider.discoveredModels?.length ?? 0;
-    main.createDiv({
-      cls: "fm-editor-model-sub",
-      text: cached === 0
-        ? "no discovery yet"
-        : `${cached} cached model${cached === 1 ? "" : "s"}`,
-    });
-
-    const actions = row.createDiv({ cls: "fm-editor-model-actions" });
-
-    const defaultBtn = actions.createEl("button", {
-      cls:
-        provider.id === this.plugin.settings.defaultProviderId
-          ? "fm-editor-btn fm-editor-btn-primary"
-          : "fm-editor-btn",
-    });
-    defaultBtn.setText(
-      provider.id === this.plugin.settings.defaultProviderId
-        ? "Default"
-        : "Make default",
-    );
-    defaultBtn.disabled = !provider.enabled;
-    defaultBtn.addEventListener("click", async () => {
-      this.plugin.settings.defaultProviderId = provider.id;
-      await this.plugin.saveSettings();
-      this.display();
-    });
-
-    const enableLabel = actions.createEl("label", { cls: "fm-editor-checkbox-line" });
-    const enableInput = enableLabel.createEl("input", { type: "checkbox" });
-    enableInput.checked = provider.enabled;
-    enableLabel.appendText("Enabled");
-    enableInput.addEventListener("change", async () => {
-      provider.enabled = enableInput.checked;
-      if (!enableInput.checked && this.plugin.settings.defaultProviderId === provider.id) {
-        this.plugin.settings.defaultProviderId =
-          this.plugin.settings.providers.find((p) => p.id !== provider.id && p.enabled)
-            ?.id ?? null;
+    toggleLabel.createSpan({ cls: "mc-toggle-track" });
+    toggleInput.checked = provider.enabled;
+    toggleInput.addEventListener("change", async () => {
+      provider.enabled = toggleInput.checked;
+      // Disabling the active provider clears the default slot so the
+      // chat picker doesn't keep pointing at a disabled row -- same
+      // behavior as VO ProvidersTab.ts:178-191.
+      if (
+        !toggleInput.checked &&
+        this.plugin.settings.defaultProviderId === provider.id
+      ) {
+        this.plugin.settings.defaultProviderId = null;
       }
       await this.plugin.saveSettings();
       this.display();
     });
 
-    const editBtn = actions.createEl("button", { cls: "fm-editor-btn" });
-    setIcon(editBtn.createSpan(), "settings");
-    editBtn.createSpan({ text: "Edit" });
-    editBtn.addEventListener("click", () => {
-      new ProviderDetailModal(this.app, this.plugin, provider, () => this.display()).open();
+    // ---- Default radio (single-pick across all rows) ----
+    const defaultEl = row.createDiv("mc-default");
+    const defaultRadio = defaultEl.createEl("input", {
+      attr: { type: "radio", name: "active-provider" },
+    });
+    defaultRadio.checked = isActive;
+    defaultRadio.disabled = !provider.enabled;
+    defaultRadio.addEventListener("change", async () => {
+      if (defaultRadio.checked) {
+        this.plugin.settings.defaultProviderId = provider.id;
+        await this.plugin.saveSettings();
+        this.display();
+      }
     });
 
-    const delBtn = actions.createEl("button", {
-      cls: "fm-editor-btn fm-editor-btn-destructive",
+    // ---- Actions: gear (configure) + trash (remove) ----
+    const actionsEl = row.createDiv("mc-actions");
+    const configBtn = actionsEl.createEl("button", {
+      cls: "mc-action-btn",
+      attr: { title: "Configure" },
     });
-    setIcon(delBtn.createSpan(), "trash-2");
+    setIcon(configBtn, "settings");
+    configBtn.addEventListener("click", () => {
+      new ProviderDetailModal(this.app, this.plugin, provider, () =>
+        this.display(),
+      ).open();
+    });
+    const delBtn = actionsEl.createEl("button", {
+      cls: "mc-action-btn mc-action-del",
+      attr: { title: "Remove" },
+    });
+    setIcon(delBtn, "trash");
     delBtn.addEventListener("click", async () => {
+      const ok = window.confirm(
+        `Remove provider "${provider.displayName || PROVIDER_LABELS[provider.type]}"?`,
+      );
+      if (!ok) return;
       this.plugin.settings.providers = this.plugin.settings.providers.filter(
         (p) => p.id !== provider.id,
       );
@@ -143,6 +187,27 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
       await this.plugin.saveSettings();
       this.display();
     });
+  }
+
+  /**
+   * Sub-line text shown under the provider name, mirroring VO's
+   * rowSummary (ProvidersTab.ts:253-263). Disabled providers get a
+   * static label; enabled providers with no discovery yet ask for a
+   * Refresh; otherwise the discovery count plus the default-model
+   * label so the user sees the chat pick at a glance.
+   */
+  private rowSummary(provider: ProviderConfig): string {
+    if (!provider.enabled) return "Disabled";
+    const cached = provider.discoveredModels ?? [];
+    if (cached.length === 0) {
+      return "No discovery yet -- click Edit and Refresh in Discovery.";
+    }
+    const defaultModelId =
+      this.plugin.settings.lastUsedModelByProvider?.[provider.id];
+    const defaultLabel = defaultModelId
+      ? cached.find((m) => m.id === defaultModelId)?.label ?? defaultModelId
+      : "no default picked";
+    return `${cached.length} models  ·  default: ${defaultLabel}`;
   }
 
   private renderGeneratorsSection(): void {
