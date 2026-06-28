@@ -45,17 +45,21 @@ export async function buildApiHandler(
         );
       }
       // VO uses api.githubcopilot.com (NOT api.individual.githubcopilot.com).
-      // The chat-completions endpoint requires max_completion_tokens, not
-      // max_tokens, and the VS Code headers below or the request is
-      // refused.
+      // The chat-completions endpoint requires max_completion_tokens
+      // and the full 6-header VS Code impersonation bundle (mirrors
+      // the Codex User-Agent gate -- a stale value gets the request
+      // rejected even with valid auth). Bundle ported 1:1 from VO
+      // src/core/security/GitHubCopilotAuthService.ts:35-42.
       return new OpenAICompatibleProvider(provider, model, {
         baseUrlOverride: "https://api.githubcopilot.com",
         overrideToken: token,
         extraHeaders: {
-          "Editor-Version": "vscode/1.95.0",
-          "Editor-Plugin-Version": "copilot-chat/0.20.0",
+          "User-Agent": "GitHubCopilotChat/0.39.2",
+          "Editor-Version": "vscode/1.111.0",
+          "Editor-Plugin-Version": "copilot-chat/0.39.2",
           "Copilot-Integration-Id": "vscode-chat",
-          "OpenAI-Intent": "conversation-panel",
+          "Openai-Intent": "conversation-panel",
+          "X-GitHub-Api-Version": "2025-10-01",
         },
         useMaxCompletionTokens: true,
       });

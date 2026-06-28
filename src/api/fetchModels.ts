@@ -266,15 +266,23 @@ async function fetchGitHubCopilot(
       error: "Sign in first.",
     };
   }
+  // Endpoint, headers and auth shape MUST match Vault Operator's
+  // working implementation (src/core/security/GitHubCopilotAuthService.ts:357-372)
+  // 1:1. Three prior mistakes broke this:
+  //  - Wrong host: api.individual.githubcopilot.com (404) -- the live
+  //    Copilot API for /models is api.githubcopilot.com.
+  //  - Editor-Plugin-Version: "frontmatter-editor/0.1" -- the backend
+  //    gates the response on this; impersonating copilot-chat is
+  //    required, same pattern as the Codex User-Agent gate.
+  //  - Missing 3 of 6 impersonation headers (User-Agent,
+  //    Openai-Intent, X-GitHub-Api-Version).
   const resp = await requestUrl({
-    url: "https://api.individual.githubcopilot.com/models",
+    url: "https://api.githubcopilot.com/models",
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
-      "Editor-Version": "vscode/1.95.0",
-      "Editor-Plugin-Version": "frontmatter-editor/0.1",
-      "Copilot-Integration-Id": "vscode-chat",
+      ...COPILOT_HEADERS,
     },
     throw: false,
   });
@@ -300,6 +308,23 @@ async function fetchGitHubCopilot(
   }));
   return { ok: true, models: models.sort(byGroupThenId) };
 }
+
+/**
+ * Shared GitHub Copilot impersonation header bundle. Ported verbatim
+ * from VO src/core/security/GitHubCopilotAuthService.ts:35-42. Sent
+ * on every Copilot HTTP call (both the token-exchange and the model
+ * list); the backend gates responses on these. Bumping User-Agent /
+ * Editor-Plugin-Version is the routine "ChatGPT-style" maintenance
+ * if the backend ever starts rejecting our impersonation.
+ */
+export const COPILOT_HEADERS: Record<string, string> = {
+  "User-Agent": "GitHubCopilotChat/0.39.2",
+  "Editor-Version": "vscode/1.111.0",
+  "Editor-Plugin-Version": "copilot-chat/0.39.2",
+  "Copilot-Integration-Id": "vscode-chat",
+  "Openai-Intent": "conversation-panel",
+  "X-GitHub-Api-Version": "2025-10-01",
+};
 
 // ---------------------------------------------------------------- KILO
 

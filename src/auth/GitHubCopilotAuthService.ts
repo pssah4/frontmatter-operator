@@ -177,29 +177,57 @@ export class GitHubCopilotAuthService {
   private async refreshCopilotToken(): Promise<void> {
     const accessToken = this.plugin.settings.githubCopilotAccessToken;
     if (!accessToken) return;
+    // Bearer scheme + COPILOT_HEADERS bundle, ported 1:1 from VO
+    // (src/core/security/GitHubCopilotAuthService.ts:307-332). The
+    // older `token <accessToken>` auth scheme + bare User-Agent
+    // sometimes works, sometimes 401s depending on the rolling
+    // backend gate -- matching VO removes the variance. Specifically
+    // 401 from this call means the underlying GitHub OAuth token is
+    // revoked, the user must redo the device flow.
     const resp = await requestUrl({
       url: "https://api.github.com/copilot_internal/v2/token",
       method: "GET",
       headers: {
-        Authorization: `token ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         Accept: "application/json",
-        "User-Agent": "FrontmatterEditorPlugin/0.1",
-        "Editor-Version": "vscode/1.95.0",
-        "Editor-Plugin-Version": "frontmatter-editor/0.1",
+        ...COPILOT_HEADERS,
       },
       throw: false,
     });
+    if (resp.status === 401) {
+      throw new Error(
+        "GitHub access token expired or revoked. Please sign in again.",
+      );
+    }
     if (resp.status >= 300) {
       throw new Error(
         `Copilot token exchange failed: HTTP ${resp.status} -- ${resp.text}`,
       );
     }
     const json = resp.json as CopilotTokenResponse;
+    if (!json.token || !json.expires_at) {
+      throw new Error("Invalid Copilot token response");
+    }
     this.plugin.settings.githubCopilotToken = json.token;
     this.plugin.settings.githubCopilotTokenExpiresAt = json.expires_at;
     await this.plugin.saveSettings();
   }
 }
+
+/**
+ * Shared Copilot impersonation header bundle. Same constant as in
+ * src/api/fetchModels.ts -- kept duplicated here rather than
+ * imported to avoid a service -> fetch dependency cycle. Bumping
+ * one means bumping both.
+ */
+const COPILOT_HEADERS: Record<string, string> = {
+  "User-Agent": "GitHubCopilotChat/0.39.2",
+  "Editor-Version": "vscode/1.111.0",
+  "Editor-Plugin-Version": "copilot-chat/0.39.2",
+  "Copilot-Integration-Id": "vscode-chat",
+  "Openai-Intent": "conversation-panel",
+  "X-GitHub-Api-Version": "2025-10-01",
+};
 
 function encodeForm(params: Record<string, string>): string {
   return Object.entries(params)
