@@ -472,7 +472,51 @@ async function fetchBedrock(draft: ProviderConfig): Promise<FetchResult> {
     seen.add(m.id);
     return true;
   });
-  return { ok: true, models: unique.sort(byGroupThenId) };
+  return { ok: true, models: unique.sort(byBedrockPriority) };
+}
+
+/**
+ * Bedrock-specific ordering for the picker. Goal: when the user opens
+ * the Default-model dropdown right after a Refresh, the first entry is
+ * an Anthropic Claude on a cross-region inference profile (the most
+ * common production pick that VO ships as default). Order rules:
+ *   1. Inference-profile-prefixed ids (eu./us./...) before bare ids.
+ *      Bare amazon.nova-* / meta.llama* ids cannot be invoked with
+ *      on-demand throughput in most regions and surface AWS's
+ *      "Invocation of model ID X with on-demand throughput isn't
+ *      supported. Retry with the ID or ARN of an inference profile..."
+ *      ValidationException.
+ *   2. Within each group, vendor priority: anthropic > amazon (nova)
+ *      > meta > mistral > cohere > ai21 > everything else. Mirrors
+ *      VO's flagship-detection heuristic in classifyModelTier.
+ *   3. Within the same vendor, latest model first (rough lex sort on
+ *      the version segment).
+ */
+function byBedrockPriority(a: FetchedModel, b: FetchedModel): number {
+  const ap = bedrockProfilePriority(a.id);
+  const bp = bedrockProfilePriority(b.id);
+  if (ap !== bp) return ap - bp;
+  const av = bedrockVendorPriority(a.id);
+  const bv = bedrockVendorPriority(b.id);
+  if (av !== bv) return av - bv;
+  // Lex descending so 4-6-v1 sorts before 4-5-v1 before 3-7 etc.
+  return b.id.localeCompare(a.id);
+}
+
+function bedrockProfilePriority(id: string): number {
+  // Inference profile prefixes get priority 0, bare ids get 1.
+  return /^[a-z]{2}\./i.test(id) ? 0 : 1;
+}
+
+function bedrockVendorPriority(id: string): number {
+  const tail = id.replace(/^[a-z]{2}\./i, "");
+  if (tail.startsWith("anthropic.")) return 0;
+  if (tail.startsWith("amazon.nova")) return 1;
+  if (tail.startsWith("meta.llama")) return 2;
+  if (tail.startsWith("mistral.")) return 3;
+  if (tail.startsWith("cohere.")) return 4;
+  if (tail.startsWith("ai21.")) return 5;
+  return 9;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime SDK types are deep generics; we treat them as a thin send-handle here

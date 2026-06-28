@@ -445,6 +445,35 @@ export class ProviderDetailModal extends Modal {
     ).open();
   }
 
+  /**
+   * Pick the model id Test-Connection should ping. Mirrors VO's
+   * pickModelForTest (ProviderDetailModal.ts:603-631) with the
+   * frontmatter-editor simplification (no tier mapping):
+   *
+   *   1. initialModelId (whatever the Default-Model picker shows -- if
+   *      the user changed it, that's what we should test).
+   *   2. First discovered model after the Bedrock-aware sort (so we get
+   *      an Anthropic inference profile before a bare Nova id).
+   *   3. First MODEL_SUGGESTIONS entry for the provider type.
+   *   4. Hardcoded fallback for ChatGPT OAuth (gpt-5.5 -- the Codex
+   *      backend has no /v1/models endpoint to seed from).
+   *   5. '' (UI surfaces a "no model" message and skips the ping).
+   *
+   * The bare-id-as-pre-selection bug ("amazon.nova-2-lite-v1:0 with
+   * on-demand throughput isn't supported") goes away once the Default
+   * picker pre-selects a Converse-safe profile (see byBedrockPriority
+   * in fetchModels.ts).
+   */
+  private pickModelForTest(): string {
+    if (this.initialModelId) return this.initialModelId;
+    const cached = this.form.discoveredModels;
+    if (cached && cached.length > 0) return cached[0].id;
+    const suggestions = MODEL_SUGGESTIONS[this.form.type] ?? [];
+    if (suggestions.length > 0) return suggestions[0].id;
+    if (this.form.type === "chatgpt-oauth") return "gpt-5.5";
+    return "";
+  }
+
   private renderTestRow(parent: HTMLElement): void {
     const setting = new Setting(parent)
       .setName("Test connection")
@@ -454,20 +483,25 @@ export class ProviderDetailModal extends Modal {
         if (!this.testEl) return;
         this.testEl.setText("Pinging...");
         try {
-          // For discovery / ping we use a deterministic default-model probe:
-          // pick the first static suggestion for the provider type.
-          const first =
-            (this.form.discoveredModels && this.form.discoveredModels[0]?.id) ?? "";
-          if (!first) {
+          // VO pattern (pickModelForTest, ProviderDetailModal.ts:603-631):
+          // priority order is tier-overrides > tier-mapping > discovered
+          // models > hardcoded fallbacks. In frontmatter-editor we
+          // collapse tier-overrides+mapping into the single
+          // initialModelId (the Default-Model picker), which is what the
+          // user will actually use for Generate-with-AI -- testing
+          // anything else is misleading. Provider-specific fallbacks
+          // mirror VO when initialModelId is empty.
+          const modelId = this.pickModelForTest();
+          if (!modelId) {
             this.testEl.setText(
-              "No cached model yet. Save provider and Refresh in Discovery to enumerate; then test from the AI chat.",
+              "No model id available. Pick one in DEFAULT MODEL or Refresh in Discovery first.",
             );
             return;
           }
           const { buildApiHandler } = await import("../../api/ProviderRegistry");
           const handler = await buildApiHandler(
             this.form,
-            { modelId: first },
+            { modelId },
             this.plugin,
           );
           const result = await handler.ping();
@@ -523,6 +557,17 @@ export class ProviderDetailModal extends Modal {
             }
             this.form.discoveredModels = result.models as DiscoveredModel[];
             this.form.discoveredAt = Date.now();
+            // VO maybeAutoRefresh-style promote: if the current default
+            // isn't in the fresh list, pick the FIRST entry from the
+            // pre-sorted result (Bedrock-aware sort already put an
+            // Anthropic inference profile at the top -- exactly the
+            // safe Converse pick). Without this, a fresh provider keeps
+            // the static suggestion default which may not even be
+            // present in the user's actual catalog.
+            const cachedIds = new Set(result.models.map((m) => m.id));
+            if (!cachedIds.has(this.initialModelId) && result.models[0]) {
+              this.initialModelId = result.models[0].id;
+            }
             this.discoveryEl.setText(
               `Fetched ${result.models.length} model${result.models.length === 1 ? "" : "s"}.`,
             );
