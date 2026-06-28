@@ -103,6 +103,16 @@ export class GeneratorService {
         }
 
         await this.applyToFrontmatter(file, opts.preset.targetProperty, parsed.value, opts.preset.parser);
+        // processFrontMatter writes to disk synchronously but Obsidian
+        // re-parses the metadata cache on the file-modify event, which
+        // fires asynchronously. Without waiting, a refreshScan that
+        // follows the generator run reads the OLD frontmatter (null for
+        // a freshly-generated property) and the table shows stale
+        // values until the user clicks a column header. Wait for the
+        // metadata-cache 'changed' event for THIS file before
+        // continuing; fall back to a short timeout so a missed event
+        // doesn't hang the run.
+        await waitForMetadataChange(this.app, file);
         result.successCount++;
       } catch (err) {
         result.errorCount++;
@@ -193,4 +203,34 @@ function mergeStringLists(a: string[], b: string[]): string[] {
     out.push(v);
   }
   return out;
+}
+
+/**
+ * Wait until Obsidian's metadata cache has re-parsed `file` after a
+ * processFrontMatter write, with a hard timeout fallback. Without this
+ * the FrontmatterScanner reads stale (pre-write) frontmatter because
+ * the metadata-cache update is async, so the table refresh that
+ * follows a Generate-with-AI run shows null in the column the user
+ * just generated.
+ */
+export async function waitForMetadataChange(
+  app: App,
+  file: TFile,
+  timeoutMs = 1500,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- ref is captured by the listener closure below
+      app.metadataCache.offref(ref);
+      clearTimeout(timer);
+      resolve();
+    };
+    const ref = app.metadataCache.on("changed", (changed) => {
+      if (changed.path === file.path) finish();
+    });
+    const timer = setTimeout(finish, timeoutMs);
+  });
 }
