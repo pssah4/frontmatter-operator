@@ -1570,6 +1570,129 @@
 }
 
 /* ----------------------------------------------------------------
+ * Editable cells (Obsidian Bases-style inline editing in the table)
+ * ---------------------------------------------------------------- */
+
+.fm-editor-cell-editable {
+  cursor: text;
+  position: relative;
+}
+
+.fm-editor-cell-editable .fm-editor-cell-display {
+  min-height: 1.4em;
+  width: 100%;
+  padding: 2px 4px;
+  border-radius: var(--radius-s);
+  border: 1px solid transparent;
+}
+
+.fm-editor-cell-editable:hover:not(.is-editing) .fm-editor-cell-display {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border);
+}
+
+.fm-editor-cell-editable.is-editing {
+  background: var(--background-primary);
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+  padding: 0;
+}
+
+.fm-editor-cell-editable.is-saving::after {
+  content: "saving...";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-style: italic;
+  pointer-events: none;
+}
+
+.fm-editor-cell-add-hint {
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: var(--font-ui-smaller);
+}
+
+.fm-editor-cell-edit {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0;
+}
+
+.fm-editor-cell-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.fm-editor-cell-input-chips {
+  flex: 1;
+  min-width: 80px;
+}
+
+.fm-editor-cell-input-json {
+  resize: vertical;
+  min-height: 80px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  padding: 6px;
+}
+
+.fm-editor-cell-bool-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.fm-editor-cell-list-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 6px;
+}
+
+.fm-editor-pill-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--background-secondary);
+  border-radius: 999px;
+  font-size: var(--font-ui-smaller);
+}
+
+.fm-editor-pill-edit .fm-editor-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.fm-editor-pill-edit .fm-editor-chip-remove:hover {
+  color: var(--text-error);
+}
+
+/* ----------------------------------------------------------------
  * Transfer modal (unified Copy / Move) -- Mode toggle + value mapping
  * ---------------------------------------------------------------- */
 

@@ -1,6 +1,7 @@
 import {
   ItemView,
   Notice,
+  TFile,
   WorkspaceLeaf,
   setIcon,
 } from "obsidian";
@@ -9,6 +10,7 @@ import type {
   Filter,
   FilterCombinator,
   FilterOperator,
+  FmValue,
   NoteRow,
   PropertyStat,
 } from "../types";
@@ -23,6 +25,8 @@ import { HelpModal } from "./modals/HelpModal";
 import { confirmModal } from "./modals/ConfirmModal";
 import { GenerateActionModal } from "./modals/GenerateActionModal";
 import { Combobox } from "./components/Combobox";
+import { renderEditableCell } from "./components/EditableCell";
+import { waitForMetadataChange } from "../services/generator/GeneratorService";
 import {
   MultiSelectPopover,
   type MultiOption,
@@ -918,11 +922,62 @@ export class FrontmatterEditorView extends ItemView {
 
       for (const col of this.columns) {
         const td = tr.createEl("td", { cls: "fm-editor-col-val" });
-        renderCell(td, row.frontmatter[col.property], (linkText) => {
-          void this.app.workspace.openLinkText(linkText, row.path, false);
+        renderEditableCell(td, row.frontmatter[col.property], {
+          openLink: (linkText) => {
+            void this.app.workspace.openLinkText(linkText, row.path, false);
+          },
+          onSave: async (next) => {
+            await this.writeNoteProperty(row.path, col.property, next);
+          },
         });
       }
       tr.createEl("td", { cls: "fm-editor-col-add" });
+    }
+  }
+
+  /**
+   * Write a single frontmatter property on a single note via the
+   * Obsidian-native processFrontMatter pipeline. Mirrors the
+   * generator's "wait for metadata-cache change before refreshing"
+   * pattern so the table redraws with the new value rather than the
+   * stale pre-write snapshot. `undefined` deletes the property.
+   */
+  private async writeNoteProperty(
+    path: string,
+    property: string,
+    next: FmValue | undefined,
+  ): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      new Notice(`Note not found: ${path}`);
+      return;
+    }
+    try {
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        if (next === undefined) {
+          delete fm[property];
+        } else {
+          fm[property] = next;
+        }
+      });
+      await waitForMetadataChange(this.app, file);
+      // Patch the in-memory row so the table redraw picks up the new
+      // value the moment we re-render. Without this the
+      // recomputeFilteredRows below would re-derive from the cache
+      // which is now correct anyway, but updating allRows keeps
+      // sorting + per-column filter results consistent.
+      const row = this.allRows.find((r) => r.path === path);
+      if (row) {
+        if (next === undefined) delete row.frontmatter[property];
+        else row.frontmatter[property] = next;
+      }
+      this.recomputeFilteredRows();
+      this.renderTableBodyOnly();
+      this.updateRuleSummary();
+    } catch (err) {
+      new Notice(
+        `Save failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -1555,69 +1610,3 @@ function compareValues(a: unknown, b: unknown): number {
   return as.localeCompare(bs, undefined, { numeric: true });
 }
 
-const WIKILINK_RE = /^\[\[([^\]]+)\]\]$/;
-
-function renderCell(
-  td: HTMLElement,
-  value: unknown,
-  openLink: (target: string) => void,
-): void {
-  if (value === undefined) {
-    td.addClass("fm-editor-cell-missing");
-    return;
-  }
-  if (value === null) {
-    td.addClass("fm-editor-cell-null");
-    td.setText("null");
-    return;
-  }
-  if (typeof value === "boolean") {
-    td.addClass(value ? "fm-editor-cell-true" : "fm-editor-cell-false");
-    td.setText(value ? "true" : "false");
-    return;
-  }
-  if (typeof value === "number") {
-    td.addClass("fm-editor-cell-num");
-    td.setText(String(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    td.addClass("fm-editor-cell-list");
-    const list = td.createDiv({ cls: "fm-editor-pills" });
-    for (const item of value) {
-      const pill = list.createSpan({ cls: "fm-editor-pill" });
-      const s = typeof item === "string" ? item : String(item);
-      const wl = s.match(WIKILINK_RE);
-      if (wl) {
-        pill.addClass("fm-editor-pill-link");
-        const link = pill.createEl("a", { text: wl[1] });
-        link.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          openLink(wl[1]);
-        });
-      } else {
-        pill.setText(s);
-      }
-    }
-    return;
-  }
-  if (typeof value === "object") {
-    td.addClass("fm-editor-cell-obj");
-    td.setText(JSON.stringify(value));
-    return;
-  }
-  const s = String(value);
-  const wl = s.match(WIKILINK_RE);
-  if (wl) {
-    const link = td.createEl("a", {
-      text: wl[1],
-      cls: "fm-editor-note-link",
-    });
-    link.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      openLink(wl[1]);
-    });
-    return;
-  }
-  td.setText(s);
-}
