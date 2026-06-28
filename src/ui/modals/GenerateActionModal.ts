@@ -7,6 +7,7 @@ import {
   PROVIDER_LABELS,
   type ProviderConfig,
 } from "../../types/llm";
+import type { GeneratorConflictMode } from "../../services/generator/GeneratorService";
 
 type NoteScope = "matched" | "selected" | "active-note";
 
@@ -39,6 +40,12 @@ export class GenerateActionModal extends Modal {
   private promptInputEl: HTMLTextAreaElement | null = null;
   private chatLogEl: HTMLElement | null = null;
   private onDone: () => void;
+  /**
+   * What to do for notes that ALREADY have a non-empty value in the
+   * target property. Default "skip" -- safest for re-runs, preserves
+   * existing data. User picks via the conflict toggle in the toolbar.
+   */
+  private conflictMode: GeneratorConflictMode = "skip";
 
   constructor(
     app: App,
@@ -171,6 +178,28 @@ export class GenerateActionModal extends Modal {
     if (this.selectedProviderModel) modelSelect.value = this.selectedProviderModel;
     modelSelect.addEventListener("change", () => {
       this.selectedProviderModel = modelSelect.value;
+    });
+
+    // Conflict picker -- behaviour when target property already has a value.
+    const conflictWrap = toolbar.createDiv({ cls: "fm-editor-chat-tool" });
+    setIcon(conflictWrap.createSpan({ cls: "fm-editor-chat-tool-icon" }), "shield-check");
+    const conflictSelect = conflictWrap.createEl("select");
+    conflictSelect.title = "If the target property already has a value";
+    conflictSelect.createEl("option", {
+      value: "skip",
+      text: "Skip notes with existing value",
+    });
+    conflictSelect.createEl("option", {
+      value: "append",
+      text: "Append to existing value",
+    });
+    conflictSelect.createEl("option", {
+      value: "overwrite",
+      text: "Overwrite existing value",
+    });
+    conflictSelect.value = this.conflictMode;
+    conflictSelect.addEventListener("change", () => {
+      this.conflictMode = conflictSelect.value as GeneratorConflictMode;
     });
 
     // ============== CHAT WINDOW ==============
@@ -387,7 +416,7 @@ export class GenerateActionModal extends Modal {
         model: { modelId: decoded.modelId },
         language: this.plugin.settings.generatorLanguage,
         targets: files,
-        skipIfPropertyExists: false,
+        conflictMode: this.conflictMode,
         knownTopics,
         knownConcepts,
         onProgress: (current, total, file) => {
@@ -402,10 +431,22 @@ export class GenerateActionModal extends Modal {
       this.appendChat("assistant", parts.join(", "));
       this.setStatus("Done.");
       new Notice(`Generator: ${parts.join(", ")}`);
+      // Show the first few skip reasons in the chat log so the user
+      // sees WHY notes were left untouched (empty body, LLM refused,
+      // parse error, conflict-mode skip, ...).
+      if (result.skipped.length > 0) {
+        const grouped = groupSkipsByReason(result.skipped);
+        for (const g of grouped.slice(0, 5)) {
+          this.appendChat(
+            "assistant",
+            `Skipped ${g.count} note${g.count === 1 ? "" : "s"}: ${g.reason}${g.examples.length ? ` (e.g. ${g.examples.join(", ")})` : ""}`,
+          );
+        }
+      }
       if (result.errors.length > 0) {
         console.warn("frontmatter-editor: generator errors", result.errors);
         for (const err of result.errors.slice(0, 5)) {
-          this.appendChat("assistant", `${err.path}: ${err.message}`);
+          this.appendChat("assistant", `Error in ${err.path}: ${err.message}`);
         }
       }
       this.onDone();
@@ -445,4 +486,30 @@ function decode(combined: string): { providerId: string; modelId: string } | nul
     providerId: combined.slice(0, idx),
     modelId: combined.slice(idx + 2),
   };
+}
+
+/**
+ * Collapse the per-note skipped[] list into one entry per distinct
+ * reason so the chat log shows a short summary instead of N
+ * identical "skipped X" lines. Each group carries up to 3 example
+ * paths so the user can spot which notes were affected.
+ */
+function groupSkipsByReason(
+  skipped: Array<{ path: string; reason: string }>,
+): Array<{ reason: string; count: number; examples: string[] }> {
+  const map = new Map<string, { reason: string; count: number; examples: string[] }>();
+  for (const s of skipped) {
+    const key = s.reason;
+    let g = map.get(key);
+    if (!g) {
+      g = { reason: s.reason, count: 0, examples: [] };
+      map.set(key, g);
+    }
+    g.count++;
+    if (g.examples.length < 3) {
+      const base = s.path.split("/").pop()?.replace(/\.md$/, "") ?? s.path;
+      g.examples.push(base);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
 }

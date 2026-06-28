@@ -9,11 +9,31 @@ import { buildApiHandler } from "../../api/ProviderRegistry";
 import type FrontmatterEditorPlugin from "../../main";
 import { parseResponse } from "./parsers";
 
+/**
+ * How a generator run handles a note that already has a non-empty
+ * value in the target property.
+ *
+ *   - "skip"      : leave the note untouched, count as skipped.
+ *   - "append"    : merge the new value into the existing value where
+ *                   the parser supports it (list-string, moc-topics-
+ *                   concepts). For single-line-text the new value
+ *                   replaces only when the existing value is empty.
+ *   - "overwrite" : always replace with the new value.
+ */
+export type GeneratorConflictMode = "skip" | "append" | "overwrite";
+
 export interface GeneratorRunResult {
   successCount: number;
   skippedCount: number;
   errorCount: number;
+  /** Errors that escaped the skip-on-error policy (typically only
+   *  fatal SDK setup errors). Per-note write or parse failures land
+   *  in `skipped` with reason="error". */
   errors: Array<{ path: string; message: string }>;
+  /** Per-note skip events with a human-readable reason. The user
+   *  sees these in the modal chat log; useful for "why didn't this
+   *  note get processed?" debugging. */
+  skipped: Array<{ path: string; reason: string }>;
 }
 
 export interface GeneratorRunOptions {
@@ -28,8 +48,10 @@ export interface GeneratorRunOptions {
   knownConcepts?: string[];
   /** Called for each note as we advance. */
   onProgress?: (current: number, total: number, file: TFile) => void;
-  /** If true, skip notes that already have the target property. Default: false (overwrite/merge). */
-  skipIfPropertyExists?: boolean;
+  /** What to do when the target property already has a non-empty
+   *  value on a note. Defaults to "skip" (the safest -- preserves
+   *  existing data). */
+  conflictMode?: GeneratorConflictMode;
 }
 
 const MAX_BODY_CHARS = 12_000;
@@ -57,7 +79,9 @@ export class GeneratorService {
       skippedCount: 0,
       errorCount: 0,
       errors: [],
+      skipped: [],
     };
+    const conflictMode: GeneratorConflictMode = opts.conflictMode ?? "skip";
     const handler = await buildApiHandler(opts.provider, opts.model, this.plugin);
     const prompts = opts.preset.prompts[opts.language];
     if (!prompts) {
@@ -69,40 +93,90 @@ export class GeneratorService {
     for (let i = 0; i < opts.targets.length; i++) {
       const file = opts.targets[i];
       opts.onProgress?.(i + 1, opts.targets.length, file);
-      try {
-        if (opts.skipIfPropertyExists) {
-          const meta = this.app.metadataCache.getFileCache(file);
-          const existing = meta?.frontmatter?.[opts.preset.targetProperty];
-          if (existing !== undefined && existing !== null && existing !== "") {
-            result.skippedCount++;
-            continue;
-          }
+
+      // ---- conflict gate ----
+      if (conflictMode === "skip") {
+        const meta = this.app.metadataCache.getFileCache(file);
+        const existing = meta?.frontmatter?.[opts.preset.targetProperty];
+        if (!isEmptyExisting(existing)) {
+          result.skippedCount++;
+          result.skipped.push({
+            path: file.path,
+            reason: `target property "${opts.preset.targetProperty}" already has a value (conflict mode: skip)`,
+          });
+          continue;
         }
+      }
 
-        const body = await this.readNoteBody(file);
-        const userPrompt = interpolate(prompts.userPrompt, {
-          NOTE_BODY: body.slice(0, MAX_BODY_CHARS),
-          NOTE_TITLE: file.basename,
-          KNOWN_TOPICS: (opts.knownTopics ?? []).join(", "),
-          KNOWN_CONCEPTS: (opts.knownConcepts ?? []).join(", "),
+      // ---- pre-check: empty body -> nothing to summarise, skip ----
+      const body = await this.readNoteBody(file);
+      if (body.trim().length === 0) {
+        result.skippedCount++;
+        result.skipped.push({
+          path: file.path,
+          reason: "note body is empty, nothing to generate from",
         });
+        continue;
+      }
 
+      const userPrompt = interpolate(prompts.userPrompt, {
+        NOTE_BODY: body.slice(0, MAX_BODY_CHARS),
+        NOTE_TITLE: file.basename,
+        KNOWN_TOPICS: (opts.knownTopics ?? []).join(", "),
+        KNOWN_CONCEPTS: (opts.knownConcepts ?? []).join(", "),
+      });
+
+      // ---- API call: skip on transport/auth errors (don't fail the
+      //                  whole run because one note 4xx'd) ----
+      let completionText: string;
+      try {
         const completion = await handler.complete({
           systemPrompt: prompts.systemPrompt,
           messages: [{ role: "user", content: userPrompt }],
         });
+        completionText = completion.text;
+      } catch (err) {
+        result.skippedCount++;
+        result.skipped.push({
+          path: file.path,
+          reason: `provider error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        continue;
+      }
 
-        const parsed = parseResponse(opts.preset.parser, completion.text);
-        if (!parsed.ok) {
-          result.errorCount++;
-          result.errors.push({
-            path: file.path,
-            message: `parse failed: ${parsed.error}`,
-          });
-          continue;
-        }
+      // ---- empty / unusable completion -> skip ----
+      const trimmed = completionText.trim();
+      if (trimmed.length === 0 || looksLikeRefusal(trimmed)) {
+        result.skippedCount++;
+        result.skipped.push({
+          path: file.path,
+          reason:
+            trimmed.length === 0
+              ? "LLM returned an empty response"
+              : "LLM refused to generate a value (note may be empty or off-topic)",
+        });
+        continue;
+      }
 
-        await this.applyToFrontmatter(file, opts.preset.targetProperty, parsed.value, opts.preset.parser);
+      // ---- parse: skip-on-fail (was an error before) ----
+      const parsed = parseResponse(opts.preset.parser, completionText);
+      if (!parsed.ok) {
+        result.skippedCount++;
+        result.skipped.push({
+          path: file.path,
+          reason: `could not parse LLM response (${parsed.error})`,
+        });
+        continue;
+      }
+
+      try {
+        await this.applyToFrontmatter(
+          file,
+          opts.preset.targetProperty,
+          parsed.value,
+          opts.preset.parser,
+          conflictMode,
+        );
         // processFrontMatter writes to disk synchronously but Obsidian
         // re-parses the metadata cache on the file-modify event, which
         // fires asynchronously. Without waiting, a refreshScan that
@@ -137,47 +211,106 @@ export class GeneratorService {
     property: string,
     value: unknown,
     parserId: string,
+    conflictMode: GeneratorConflictMode,
   ): Promise<void> {
     await this.app.fileManager.processFrontMatter(file, (fm: Frontmatter) => {
+      const existingRaw = fm[property];
+      const targetEmpty = isEmptyExisting(existingRaw);
+
+      // The "skip" mode was already enforced in run() before we got
+      // here. By the time applyToFrontmatter fires the call site has
+      // promised the write is OK. We still honour the mode for the
+      // edge case where another process raced and added a value
+      // between the metadataCache check and processFrontMatter.
+
       if (parserId === "moc_topics_concepts") {
         const payload = value as { topics: string[]; concepts: string[] };
-        const existingRaw = fm[property];
+        if (conflictMode === "overwrite" || targetEmpty) {
+          fm[property] = {
+            topics: payload.topics,
+            concepts: payload.concepts,
+          } as never;
+          return;
+        }
+        // append (or skip-with-race): merge
         const existing =
           existingRaw && typeof existingRaw === "object" && !Array.isArray(existingRaw)
             ? (existingRaw as { topics?: unknown; concepts?: unknown })
             : { topics: [], concepts: [] };
-        const mergedTopics = mergeStringLists(
-          arr(existing.topics),
-          payload.topics,
-        );
-        const mergedConcepts = mergeStringLists(
-          arr(existing.concepts),
-          payload.concepts,
-        );
         fm[property] = {
-          topics: mergedTopics,
-          concepts: mergedConcepts,
+          topics: mergeStringLists(arr(existing.topics), payload.topics),
+          concepts: mergeStringLists(arr(existing.concepts), payload.concepts),
         } as never;
         return;
       }
       if (parserId === "list_string") {
-        const existing = arr(fm[property]);
         const incoming = Array.isArray(value) ? (value as unknown[]).map(String) : [];
-        const merged = mergeStringLists(existing, incoming);
-        fm[property] = merged as never;
+        if (conflictMode === "overwrite" || targetEmpty) {
+          fm[property] = incoming as never;
+          return;
+        }
+        // append (or skip-with-race): merge
+        fm[property] = mergeStringLists(arr(existingRaw), incoming) as never;
         return;
       }
-      // single_line_text
-      const existing = fm[property];
-      if (existing === undefined || existing === null || existing === "") {
+      // single_line_text (description et al.)
+      if (conflictMode === "overwrite" || targetEmpty) {
         fm[property] = value as never;
-      } else if (typeof existing === "string" && existing.length === 0) {
-        fm[property] = value as never;
+        return;
       }
-      // Note: for descriptions we deliberately do NOT overwrite existing text.
-      // The user can clear it manually if they want a regeneration.
+      // append: concat with a separator. For free-form text the
+      // append usually means "extend the description", so glue the
+      // new value after a paragraph break.
+      if (conflictMode === "append" && typeof existingRaw === "string") {
+        fm[property] = `${existingRaw}\n\n${value as string}` as never;
+      }
+      // The conflictMode === "skip" race case: leave existing alone.
     });
   }
+}
+
+/**
+ * Same emptiness test the conflict gate uses up in run(). Centralised
+ * here so the metadata-cache check and the processFrontMatter write
+ * agree on what counts as "already has a value".
+ */
+function isEmptyExisting(v: unknown): boolean {
+  if (v === undefined || v === null) return true;
+  if (typeof v === "string") return v.trim() === "";
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") {
+    // moc-style nested object: empty iff topics+concepts both empty.
+    const obj = v as Record<string, unknown>;
+    const t = obj.topics, c = obj.concepts;
+    if (Array.isArray(t) && Array.isArray(c)) return t.length === 0 && c.length === 0;
+    // Any other object shape: assume non-empty -- the user explicitly
+    // wrote something we don't recognise, so we don't clobber it.
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Heuristic: detect refusal / "can't generate" responses from the LLM.
+ * Intentionally conservative -- false positives here mean a valid
+ * answer gets dropped, so we only match clear English / German
+ * refusal phrasings, never substrings that could appear in a real
+ * description. Caller skips notes that match.
+ */
+function looksLikeRefusal(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  if (lower.length > 300) return false; // a long answer is an answer
+  const patterns = [
+    /^i (cannot|can't|am unable to|am not able to)\b/,
+    /^sorry,? i (cannot|can't|am unable)/,
+    /^there is (no|nothing) (content|information|text) (to|that)/,
+    /^the (note|document|file) (is|appears to be) empty/,
+    /^cannot generate/,
+    /^unable to generate/,
+    /^(ich kann|leider kann ich) (das|dies)? ?nicht/,
+    /^die notiz (ist|scheint) leer/,
+  ];
+  return patterns.some((re) => re.test(lower));
 }
 
 function interpolate(template: string, vars: Record<string, string>): string {
