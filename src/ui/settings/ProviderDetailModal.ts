@@ -3,7 +3,9 @@ import type FrontmatterEditorPlugin from "../../main";
 import {
   DEFAULT_API_VERSIONS,
   DEFAULT_BASE_URLS,
+  MODEL_SUGGESTIONS,
   PROVIDER_LABELS,
+  getDefaultModelForProvider,
   newProviderId,
   type AwsAuthMode,
   type DiscoveredModel,
@@ -28,6 +30,15 @@ export class ProviderDetailModal extends Modal {
   private isNew: boolean;
   private testEl: HTMLElement | null = null;
   private discoveryEl: HTMLElement | null = null;
+  /**
+   * Initial-model picker for the Add-Provider flow. Pre-selected to the
+   * first MODEL_SUGGESTIONS entry for the chosen provider type. On Save
+   * it lands in plugin.settings.lastUsedModelByProvider[id] so the AI
+   * chat picker has a sensible default the moment the new provider is
+   * usable. Mirrors VO's defaultDraftProvider + maybeAutoRefresh
+   * pre-population pattern.
+   */
+  private initialModelId: string = "";
 
   constructor(
     app: App,
@@ -47,6 +58,14 @@ export class ProviderDetailModal extends Modal {
           apiKey: "",
           baseUrl: DEFAULT_BASE_URLS.anthropic,
         } satisfies ProviderConfig);
+    // Seed the default-model picker:
+    //   * Add-flow: first MODEL_SUGGESTIONS entry for the type.
+    //   * Edit-flow: whatever the user last picked for this provider, or
+    //     fall back to the suggestion-default.
+    this.initialModelId = this.isNew
+      ? getDefaultModelForProvider(this.form.type)
+      : (plugin.settings.lastUsedModelByProvider?.[this.form.id] ??
+         getDefaultModelForProvider(this.form.type));
   }
 
   onOpen(): void {
@@ -58,7 +77,75 @@ export class ProviderDetailModal extends Modal {
     this.renderIdentitySection(contentEl);
     this.renderAuthSection(contentEl);
     this.renderDiscoverySection(contentEl);
+    this.renderDefaultModelSection(contentEl);
     this.renderFooter(contentEl);
+  }
+
+  // ----------------------------------------------------------- DEFAULT MODEL
+
+  /**
+   * Pre-selected model the AI chat picker uses the first time this
+   * provider is the source. On Add this is seeded from
+   * getDefaultModelForProvider(type); on Edit from the persisted
+   * lastUsedModelByProvider entry. The Save handler writes the picked
+   * value to lastUsedModelByProvider[id]. For providers without static
+   * suggestions (azure / ollama / lmstudio / custom) the picker becomes
+   * a free-text input so the user can paste a model id.
+   */
+  private renderDefaultModelSection(parent: HTMLElement): void {
+    parent.createDiv({
+      cls: "fm-editor-modal-section-label",
+      text: "DEFAULT MODEL",
+    });
+
+    const cached = this.form.discoveredModels ?? [];
+    const suggestions = MODEL_SUGGESTIONS[this.form.type] ?? [];
+    const haveDropdown = cached.length > 0 || suggestions.length > 0;
+
+    if (haveDropdown) {
+      new Setting(parent)
+        .setName("Default model")
+        .setDesc(
+          cached.length > 0
+            ? "Picked from the latest Refresh. Generate-with-AI defaults to this model."
+            : "Static suggestion list. Click Refresh in Discovery to pull the live list.",
+        )
+        .addDropdown((d) => {
+          // Cached refresh results win over static suggestions.
+          if (cached.length > 0) {
+            for (const m of cached) d.addOption(m.id, m.label);
+          } else {
+            for (const s of suggestions) {
+              d.addOption(s.id, `${s.group} -- ${s.label}`);
+            }
+          }
+          // If the seed isn't in the option list (e.g. type just
+          // changed), fall back to the first available option.
+          const available = (cached.length > 0 ? cached : suggestions).map(
+            (m) => ("id" in m ? m.id : ""),
+          );
+          if (!available.includes(this.initialModelId) && available[0]) {
+            this.initialModelId = available[0];
+          }
+          d.setValue(this.initialModelId);
+          d.onChange((v) => {
+            this.initialModelId = v;
+          });
+        });
+    } else {
+      new Setting(parent)
+        .setName("Default model")
+        .setDesc(
+          "This provider has no static suggestions. Type the model id you want as the default.",
+        )
+        .addText((t) => {
+          t.setPlaceholder("model-id");
+          t.setValue(this.initialModelId);
+          t.onChange((v) => {
+            this.initialModelId = v.trim();
+          });
+        });
+    }
   }
 
   // ----------------------------------------------------------- IDENTITY
@@ -84,6 +171,8 @@ export class ProviderDetailModal extends Modal {
           // Reset auth fields for the new provider type.
           this.form.discoveredModels = undefined;
           this.form.discoveredAt = undefined;
+          // Reseed the default-model picker for the new type.
+          this.initialModelId = getDefaultModelForProvider(this.form.type);
           if (this.isNew) {
             this.form.displayName = PROVIDER_LABELS[this.form.type];
           }
@@ -472,6 +561,16 @@ export class ProviderDetailModal extends Modal {
       this.plugin.settings.providers = list;
       if (!this.plugin.settings.defaultProviderId && this.form.enabled) {
         this.plugin.settings.defaultProviderId = this.form.id;
+      }
+      // Persist the picked default model. Generate-with-AI reads this on
+      // its first run for the provider; without it the picker has no
+      // sensible pre-selection on a fresh add.
+      if (this.initialModelId) {
+        if (!this.plugin.settings.lastUsedModelByProvider) {
+          this.plugin.settings.lastUsedModelByProvider = {};
+        }
+        this.plugin.settings.lastUsedModelByProvider[this.form.id] =
+          this.initialModelId;
       }
       await this.plugin.saveSettings();
       this.onSaved();

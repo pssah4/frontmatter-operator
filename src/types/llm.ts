@@ -125,49 +125,116 @@ export interface ModelSuggestion {
   label: string;
 }
 
-/** Static fallback suggestions when the provider's discovery returned nothing. */
+/**
+ * Static fallback suggestions. Ported 1:1 from Vault Operator
+ * (src/ui/settings/constants.ts). For providers that ship a live
+ * discovery endpoint these are only used until the user clicks Refresh.
+ * ChatGPT-OAuth picks must stay a subset of the Codex /codex/models
+ * lineup; otherwise the backend rejects them as "not supported when
+ * using Codex with a ChatGPT account".
+ */
 export const MODEL_SUGGESTIONS: Record<ProviderType, ModelSuggestion[]> = {
   anthropic: [
-    { group: "Claude 4", id: "claude-opus-4-7", label: "Claude Opus 4.7" },
-    { group: "Claude 4", id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-    { group: "Claude 4", id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-    { group: "Claude 3.x", id: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet" },
+    { group: "Claude 4", id: "claude-opus-4-6", label: "Claude Opus 4.6" },
+    { group: "Claude 4", id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+    { group: "Claude 4", id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+    { group: "Claude 3.x", id: "claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet" },
+    { group: "Claude 3.x", id: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
+    { group: "Claude 3.x", id: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
   ],
   openai: [
+    { group: "GPT-5", id: "gpt-5", label: "GPT-5" },
+    { group: "GPT-5", id: "gpt-5-mini", label: "GPT-5 mini" },
+    { group: "GPT-4.1", id: "gpt-4.1", label: "GPT-4.1" },
+    { group: "GPT-4.1", id: "gpt-4.1-mini", label: "GPT-4.1 mini" },
+    { group: "GPT-4.1", id: "gpt-4.1-nano", label: "GPT-4.1 nano" },
     { group: "GPT-4o", id: "gpt-4o", label: "GPT-4o" },
     { group: "GPT-4o", id: "gpt-4o-mini", label: "GPT-4o mini" },
-    { group: "GPT-4.1", id: "gpt-4.1", label: "GPT-4.1" },
     { group: "Reasoning", id: "o3", label: "o3" },
+    { group: "Reasoning", id: "o4-mini", label: "o4-mini" },
+    { group: "Reasoning", id: "o1", label: "o1" },
+    { group: "Codex", id: "codex-mini-latest", label: "Codex Mini" },
   ],
   gemini: [
     { group: "Gemini 2.5", id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
     { group: "Gemini 2.5", id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { group: "Gemini 2.5", id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
+    { group: "Gemini 2.0", id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
   ],
-  ollama: [
-    { group: "Local", id: "llama3.2", label: "Llama 3.2" },
-    { group: "Local", id: "qwen2.5:7b", label: "Qwen 2.5 7B" },
-  ],
+  ollama: [],
   lmstudio: [],
   openrouter: [
-    { group: "Anthropic", id: "anthropic/claude-opus-4-7", label: "Claude Opus 4.7" },
+    { group: "Anthropic", id: "anthropic/claude-opus-4-6", label: "Claude Opus 4.6" },
+    { group: "Anthropic", id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+    { group: "Anthropic", id: "anthropic/claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet" },
+    { group: "Anthropic", id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet" },
+    { group: "OpenAI", id: "openai/gpt-5", label: "GPT-5" },
+    { group: "OpenAI", id: "openai/gpt-4.1", label: "GPT-4.1" },
     { group: "OpenAI", id: "openai/gpt-4o", label: "GPT-4o" },
+    { group: "OpenAI", id: "openai/o3", label: "o3" },
+    { group: "OpenAI", id: "openai/o4-mini", label: "o4-mini" },
+    { group: "Mistral", id: "mistralai/mistral-large-latest", label: "Mistral Large" },
+    { group: "Mistral", id: "mistralai/mistral-medium-3", label: "Mistral Medium 3" },
+    { group: "DeepSeek", id: "deepseek/deepseek-chat-v3-0324", label: "DeepSeek V3" },
+    { group: "DeepSeek", id: "deepseek/deepseek-r1", label: "DeepSeek R1" },
+    { group: "Kimi", id: "moonshotai/kimi-k2", label: "Kimi K2" },
   ],
   azure: [],
   "github-copilot": [
     { group: "Anthropic", id: "claude-sonnet-4", label: "Claude Sonnet 4" },
+    { group: "Anthropic", id: "claude-3.5-sonnet", label: "Claude 3.5 Sonnet" },
+    { group: "OpenAI", id: "gpt-5.4", label: "GPT-5.4" },
     { group: "OpenAI", id: "gpt-4o", label: "GPT-4o" },
+    { group: "OpenAI", id: "gpt-4o-mini", label: "GPT-4o mini" },
+    { group: "OpenAI", id: "gpt-4.1", label: "GPT-4.1" },
+    { group: "Reasoning", id: "o3-mini", label: "o3-mini" },
+    { group: "Reasoning", id: "o4-mini", label: "o4-mini" },
   ],
-  "kilo-gateway": [{ group: "Auto", id: "kilo/auto", label: "Kilo (auto)" }],
+  "kilo-gateway": [
+    { group: "Kilo", id: "kilo/auto", label: "Auto (recommended)" },
+  ],
+  // Bedrock: cross-region inference profile IDs. `eu.` routes EU regions
+  // (Frankfurt/Ireland/Paris), `us.` routes US regions. Direct model IDs
+  // (no prefix) only work in the specific hosting region. All entries
+  // below are verified Converse-compatible (text-or-chat models).
   bedrock: [
-    { group: "Anthropic (EU)", id: "eu.anthropic.claude-opus-4-6-v1", label: "Claude Opus 4.6 (EU)" },
-    { group: "Anthropic (US)", id: "us.anthropic.claude-opus-4-6-v1", label: "Claude Opus 4.6 (US)" },
+    { group: "Claude 4 (EU)", id: "eu.anthropic.claude-opus-4-6-v1", label: "Claude Opus 4.6 (EU)" },
+    { group: "Claude 4 (EU)", id: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0", label: "Claude Sonnet 4.5 (EU)" },
+    { group: "Claude 4 (EU)", id: "eu.anthropic.claude-opus-4-5-20250930-v1:0", label: "Claude Opus 4.5 (EU)" },
+    { group: "Claude 4 (EU)", id: "eu.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Claude Haiku 4.5 (EU)" },
+    { group: "Claude 3.x (EU)", id: "eu.anthropic.claude-3-7-sonnet-20250219-v1:0", label: "Claude 3.7 Sonnet (EU)" },
+    { group: "Claude 3.x (EU)", id: "eu.anthropic.claude-3-5-sonnet-20241022-v2:0", label: "Claude 3.5 Sonnet v2 (EU)" },
+    { group: "Claude 4 (US)", id: "us.anthropic.claude-opus-4-6-v1", label: "Claude Opus 4.6 (US)" },
+    { group: "Claude 4 (US)", id: "us.anthropic.claude-sonnet-4-5-20250929-v1:0", label: "Claude Sonnet 4.5 (US)" },
+    { group: "Claude 4 (US)", id: "us.anthropic.claude-opus-4-5-20250930-v1:0", label: "Claude Opus 4.5 (US)" },
+    { group: "Claude 4 (US)", id: "us.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Claude Haiku 4.5 (US)" },
+    { group: "Claude 3.x (US)", id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0", label: "Claude 3.7 Sonnet (US)" },
+    { group: "Claude 3.x (US)", id: "us.anthropic.claude-3-5-sonnet-20241022-v2:0", label: "Claude 3.5 Sonnet v2 (US)" },
+    { group: "Amazon Nova", id: "eu.amazon.nova-pro-v1:0", label: "Nova Pro (EU)" },
+    { group: "Amazon Nova", id: "eu.amazon.nova-lite-v1:0", label: "Nova Lite (EU)" },
+    { group: "Amazon Nova", id: "us.amazon.nova-pro-v1:0", label: "Nova Pro (US)" },
+    { group: "Amazon Nova", id: "us.amazon.nova-lite-v1:0", label: "Nova Lite (US)" },
   ],
+  // ChatGPT OAuth: MUST stay subset of Codex KNOWN_MODELS in
+  // ChatGptResponsesProvider. gpt-5 / gpt-5-codex are NOT on the Codex
+  // backend lineup; only the gpt-5.x ids are accepted.
   "chatgpt-oauth": [
-    { group: "GPT-5", id: "gpt-5", label: "GPT-5" },
-    { group: "GPT-5", id: "gpt-5-codex", label: "GPT-5 Codex" },
+    { group: "GPT-5", id: "gpt-5.5", label: "GPT-5.5" },
+    { group: "GPT-5", id: "gpt-5.4", label: "GPT-5.4" },
+    { group: "GPT-5", id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
   ],
   custom: [],
 };
+
+/**
+ * Default model id when a fresh provider of this type is created. Picks
+ * the first suggestion (typically the flagship). Empty string for
+ * providers that have no static suggestions (azure / ollama / lmstudio /
+ * custom) -- the user must enter a model id manually for those.
+ */
+export function getDefaultModelForProvider(p: ProviderType): string {
+  return MODEL_SUGGESTIONS[p]?.[0]?.id ?? "";
+}
 
 // --------------------------------------------------------- helpers
 

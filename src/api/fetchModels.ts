@@ -499,6 +499,10 @@ async function listInferenceProfiles(
     for (const p of response.inferenceProfileSummaries ?? []) {
       if ((p.status ?? "ACTIVE") !== "ACTIVE") continue;
       if (!p.inferenceProfileId) continue;
+      // Inference profiles route to the same underlying foundation models,
+      // so the family denylist applies just as well -- a cross-region
+      // profile id like 'us.amazon.nova-canvas-v1:0' must not slip through.
+      if (!isConverseCompatibleId(p.inferenceProfileId)) continue;
       list.push({
         id: p.inferenceProfileId,
         label: p.inferenceProfileName ?? p.inferenceProfileId,
@@ -511,26 +515,85 @@ async function listInferenceProfiles(
   return { ok: true, list };
 }
 
+/**
+ * Bedrock id patterns to drop from the picker even when AWS returns them
+ * in TEXT-output mode. ConverseCommand rejects every entry below with
+ * ValidationException: "This action doesn't support the model that you
+ * provided. Try again with a supported text or chat model." Patterns
+ * are case-insensitive substring matches on the model id.
+ */
+export const BEDROCK_NON_CONVERSE_DENYLIST: ReadonlyArray<{
+  pattern: RegExp;
+  reason: string;
+}> = [
+  { pattern: /cohere\.embed/i, reason: "Cohere embeddings -- embeddings API only" },
+  { pattern: /amazon\.titan-embed/i, reason: "Titan embeddings -- embeddings API only" },
+  { pattern: /amazon\.titan-image/i, reason: "Titan Image Generator -- image-gen API only" },
+  { pattern: /amazon\.nova-canvas/i, reason: "Nova Canvas -- image generation" },
+  { pattern: /amazon\.nova-reel/i, reason: "Nova Reel -- video generation" },
+  { pattern: /amazon\.nova-sonic/i, reason: "Nova Sonic -- speech-to-speech" },
+  { pattern: /amazon\.rerank/i, reason: "Amazon Rerank -- reranking API" },
+  { pattern: /cohere\.rerank/i, reason: "Cohere Rerank -- reranking API" },
+  { pattern: /stability\./i, reason: "Stability SD/SDXL -- image generation" },
+  { pattern: /stable-diffusion/i, reason: "Stable Diffusion variant -- image generation" },
+  { pattern: /ai21\.jamba-instruct/i, reason: "AI21 Jamba Instruct legacy -- InvokeModel only" },
+  { pattern: /ai21\.j2-/i, reason: "AI21 Jurassic-2 legacy -- InvokeModel only" },
+  { pattern: /contextual-answers/i, reason: "AI21 contextual-answers -- task-specific endpoint" },
+  { pattern: /summarize|paraphrase/i, reason: "AI21 task-specific endpoints" },
+  { pattern: /guardrail/i, reason: "Bedrock Guardrails -- policy enforcement" },
+  { pattern: /meta\.llama2-/i, reason: "Llama 2 family -- predates Converse" },
+  { pattern: /cohere\.command-(?:text|light-text)/i, reason: "Cohere Command legacy -- InvokeModel only" },
+  { pattern: /transcribe|whisper|tts|speech/i, reason: "Speech models -- not Converse" },
+];
+
+export function isConverseCompatibleId(modelId: string): boolean {
+  for (const { pattern } of BEDROCK_NON_CONVERSE_DENYLIST) {
+    if (pattern.test(modelId)) return false;
+  }
+  return true;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime SDK types are deep generics
 async function listFoundationModels(
   client: any,
   ListFoundationModelsCommand: any,
 ): Promise<{ ok: true; list: FetchedModel[] } | { ok: false; error: string; list: FetchedModel[] }> {
-  const cmd = new ListFoundationModelsCommand({});
+  // Server-side gate 1: byOutputModality=TEXT drops image-gen / video-gen
+  // / speech models AWS-side, so the response doesn't even ship them. VO
+  // (testModelConnection.ts:721) does the same.
+  const cmd = new ListFoundationModelsCommand({ byOutputModality: "TEXT" });
   const response = (await client.send(cmd)) as {
     modelSummaries?: Array<{
       modelId?: string;
       modelName?: string;
       providerName?: string;
       inferenceTypesSupported?: string[];
+      inputModalities?: string[];
       outputModalities?: string[];
+      modelLifecycle?: { status?: string };
+      responseStreamingSupported?: boolean;
     }>;
   };
   const list: FetchedModel[] = (response.modelSummaries ?? [])
+    // Belt-and-suspenders: keep only TEXT-output even if AWS shipped a
+    // mis-tagged entry (Stability SD models occasionally slip through
+    // byOutputModality=TEXT depending on region).
     .filter((m) => (m.outputModalities ?? ["TEXT"]).includes("TEXT"))
-    .filter((m) =>
-      (m.inferenceTypesSupported ?? ["ON_DEMAND"]).includes("ON_DEMAND"),
-    )
+    // Some image-edit models accept only IMAGE input -- the Converse
+    // API needs at least TEXT input.
+    .filter((m) => (m.inputModalities ?? ["TEXT"]).includes("TEXT"))
+    // Provisioned-throughput-only models cannot be invoked from Converse
+    // without standing up dedicated capacity. ON_DEMAND and
+    // INFERENCE_PROFILE both work; PROVISIONED alone does not.
+    .filter((m) => {
+      const types = m.inferenceTypesSupported ?? ["ON_DEMAND"];
+      return types.includes("ON_DEMAND") || types.includes("INFERENCE_PROFILE");
+    })
+    // Drop LEGACY models -- AWS keeps listing them but Converse 400s.
+    .filter((m) => (m.modelLifecycle?.status ?? "ACTIVE") === "ACTIVE")
+    // Family denylist for known non-Converse model classes that occasionally
+    // pass the TEXT-modality filter (rerank, contextual-answers, etc.).
+    .filter((m) => (m.modelId ? isConverseCompatibleId(m.modelId) : false))
     .map((m) => ({
       id: m.modelId ?? "",
       label: m.modelName ?? m.modelId ?? "",
