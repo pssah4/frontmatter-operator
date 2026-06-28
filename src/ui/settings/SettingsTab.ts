@@ -4,6 +4,7 @@ import {
   GENERATOR_LANGUAGE_LABELS,
   GENERATOR_LANGUAGES,
   DEFAULT_PRESETS,
+  type GeneratorLanguage,
 } from "../../types/generators";
 import { PROVIDER_LABELS, type ProviderConfig } from "../../types/llm";
 import { ProviderDetailModal } from "./ProviderDetailModal";
@@ -226,7 +227,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
         }
         d.setValue(this.plugin.settings.generatorLanguage);
         d.onChange(async (value) => {
-          this.plugin.settings.generatorLanguage = value as "en" | "de";
+          this.plugin.settings.generatorLanguage = value as GeneratorLanguage;
           await this.plugin.saveSettings();
           this.display();
         });

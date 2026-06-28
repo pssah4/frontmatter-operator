@@ -18,7 +18,11 @@ import {
   type FrontmatterEditorSettings,
 } from "./types/settings";
 import { FrontmatterEditorSettingsTab } from "./ui/settings/SettingsTab";
-import { DEFAULT_PRESETS, migrateLegacyCustomPrompt } from "./types/generators";
+import {
+  DEFAULT_PRESETS,
+  fillMissingLanguagePrompts,
+  migrateLegacyCustomPrompt,
+} from "./types/generators";
 import { SafeStorageService } from "./auth/SafeStorageService";
 import { GitHubCopilotAuthService } from "./auth/GitHubCopilotAuthService";
 import { ChatGptOAuthService } from "./auth/ChatGptOAuthService";
@@ -190,20 +194,19 @@ export default class FrontmatterEditorPlugin extends Plugin {
   }
 
   private mergePresets(stored?: typeof DEFAULT_PRESETS): typeof DEFAULT_PRESETS {
-    // Keep built-in presets in sync with code; preserve user prompt edits.
+    // Keep built-in presets in sync with code; preserve user prompt
+    // edits per language; fill missing languages from the canonical
+    // defaults so the 11-language expansion doesn't break old saves
+    // that only had en+de.
     if (!stored || stored.length === 0) return JSON.parse(JSON.stringify(DEFAULT_PRESETS));
     const byId = new Map(stored.map((p) => [p.id, p]));
     const merged = DEFAULT_PRESETS.map((d) => {
       const existing = byId.get(d.id);
       if (!existing) return JSON.parse(JSON.stringify(d));
-      // existing wins for prompts; missing language fallback to default
-      return {
+      return fillMissingLanguagePrompts({
         ...d,
-        prompts: {
-          en: existing.prompts?.en ?? d.prompts.en,
-          de: existing.prompts?.de ?? d.prompts.de,
-        },
-      };
+        prompts: { ...d.prompts, ...(existing.prompts ?? {}) },
+      });
     });
     return merged;
   }

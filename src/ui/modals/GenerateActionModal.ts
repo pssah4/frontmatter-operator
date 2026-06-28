@@ -1,7 +1,13 @@
 import { App, Modal, Notice, TFile, setIcon } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import type { NoteRow } from "../../types";
-import type { CustomPromptTemplate, GeneratorParserId, GeneratorPreset } from "../../types/generators";
+import type {
+  CustomPromptTemplate,
+  GeneratorLanguage,
+  GeneratorParserId,
+  GeneratorPreset,
+} from "../../types/generators";
+import { GENERATOR_LANGUAGES } from "../../types/generators";
 import {
   MODEL_SUGGESTIONS,
   PROVIDER_LABELS,
@@ -381,10 +387,15 @@ export class GenerateActionModal extends Modal {
       description: "",
       parser: this.parser,
       isBuiltIn: false,
-      prompts: {
-        en: this.promptText,
-        de: this.promptText,
-      },
+      // Same prompt text wired across every supported language so the
+      // ad-hoc preset works regardless of the user's current
+      // settings.generatorLanguage. The Generate-with-AI modal sends
+      // one prompt; the language picker doesn't apply here because the
+      // user already wrote the prompt in whatever language they
+      // wanted.
+      prompts: Object.fromEntries(
+        GENERATOR_LANGUAGES.map((lang) => [lang, this.promptText]),
+      ) as Record<GeneratorLanguage, string>,
     };
 
     const files: TFile[] = targets.map((r) => r.file);
