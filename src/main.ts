@@ -161,6 +161,14 @@ export default class FrontmatterEditorPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "dedupe-wikilinks",
+      name: "Deduplicate wikilinks across the vault",
+      callback: () => {
+        void this.runWikilinkDedup();
+      },
+    });
+
+    this.addCommand({
       id: "list-properties",
       name: "Print frontmatter property inventory to console",
       callback: () => {
@@ -231,6 +239,55 @@ export default class FrontmatterEditorPlugin extends Plugin {
       "[frontmatter-editor] cleanup write report:",
       real,
     );
+  }
+
+  /**
+   * Two-phase wikilink dedup (also reachable from the Settings
+   * Maintenance section and, with `paths`, from the table's selection
+   * action bar). Collapses frontmatter wikilinks that resolve to the
+   * same note and shortens lone path-form links to Obsidian's canonical
+   * form. Dry-run scan -> confirm -> snapshotted real run.
+   */
+  async runWikilinkDedup(opts: { paths?: string[] } = {}): Promise<void> {
+    const { WikilinkDedupCleanupService } = await import(
+      "./services/WikilinkDedupCleanupService"
+    );
+    const service = new WikilinkDedupCleanupService(this.app, this.snapshots);
+    const scopeLabel = opts.paths
+      ? `${opts.paths.length} selected note${opts.paths.length === 1 ? "" : "s"}`
+      : "the vault";
+    const dry = await service.run({ dryRun: true, paths: opts.paths });
+    if (dry.notesTouched === 0) {
+      new Notice(
+        `Wikilink dedup: scanned ${dry.notesScanned} notes in ${scopeLabel}, no duplicate or path-form links to clean.`,
+        8000,
+      );
+      return;
+    }
+    const propsAffected = Object.entries(dry.propertiesAffected)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `${k} (${n})`)
+      .join(", ");
+    const ok = window.confirm(
+      `Deduplicate wikilinks in ${scopeLabel}?\n\n` +
+        `Notes affected:     ${dry.notesTouched} of ${dry.notesScanned}\n` +
+        `Duplicates removed: ${dry.duplicatesRemoved}\n` +
+        `Links shortened:    ${dry.linksRewritten}\n` +
+        `Properties:         ${propsAffected}\n\n` +
+        `A snapshot is saved so the change is undoable via ` +
+        `"Undo last frontmatter action".`,
+    );
+    if (!ok) return;
+    const real = await service.run({ dryRun: false, paths: opts.paths });
+    const errSuffix =
+      real.errors.length > 0 ? `, ${real.errors.length} errors` : "";
+    new Notice(
+      `Wikilink dedup done: ${real.notesTouched}/${real.notesScanned} notes, ` +
+        `${real.duplicatesRemoved} duplicates removed, ${real.linksRewritten} links shortened${errSuffix}. ` +
+        `Undo via "Undo last frontmatter action".`,
+      10_000,
+    );
+    console.debug("[frontmatter-editor] wikilink dedup report:", real);
   }
 
   async loadSettings(): Promise<void> {

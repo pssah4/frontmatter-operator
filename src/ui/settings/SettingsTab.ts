@@ -57,6 +57,16 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
           await this.plugin.runRefusalCleanup();
         });
       });
+    new Setting(containerEl)
+      .setName("Deduplicate wikilinks")
+      .setDesc(
+        "Scan every note and collapse frontmatter wikilinks that point at the same file (e.g. `[[Folder/Name]]` plus `[[Name]]`) to one canonical link, also shortening lone path-form links. Snapshot is saved so the change is undoable.",
+      )
+      .addButton((b) => {
+        b.setButtonText("Run dedupe").onClick(async () => {
+          await this.plugin.runWikilinkDedup();
+        });
+      });
   }
 
   private renderProvidersSection(): void {

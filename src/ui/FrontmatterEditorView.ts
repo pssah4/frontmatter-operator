@@ -1457,6 +1457,14 @@ export class FrontmatterEditorView extends ItemView {
     );
     transferBtn.addEventListener("click", () => this.openTransferModal());
 
+    const dedupeBtn = this.makeActionButton(
+      buttons,
+      "link",
+      "Dedupe links",
+      "Collapse frontmatter wikilinks that point at the same file (e.g. [[Folder/Name]] + [[Name]]) to one canonical link",
+    );
+    dedupeBtn.addEventListener("click", () => void this.runDedupe());
+
     const delBtn = this.makeActionButton(
       buttons,
       "trash-2",
@@ -1482,6 +1490,15 @@ export class FrontmatterEditorView extends ItemView {
     });
     btn.title = title;
     return btn;
+  }
+
+  private async runDedupe(): Promise<void> {
+    const targets = this.getTargetRows();
+    if (targets.length === 0) {
+      new Notice("No notes targeted — adjust the rule first.");
+      return;
+    }
+    await this.plugin.runWikilinkDedup({ paths: targets.map((r) => r.path) });
   }
 
   private getTargetRows(): NoteRow[] {
