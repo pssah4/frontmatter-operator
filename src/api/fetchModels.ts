@@ -83,7 +83,7 @@ async function fetchOpenAICompatible(
   if (draft.apiKey) headers["Authorization"] = `Bearer ${draft.apiKey}`;
   if (provider === "openrouter") {
     headers["HTTP-Referer"] =
-      "https://github.com/pssah4/frontmatter-editor-dev";
+      "https://github.com/pssah4/frontmatter-editor";
     headers["X-Title"] = "Frontmatter Editor";
   }
 
@@ -175,8 +175,15 @@ async function fetchGemini(draft: ProviderConfig): Promise<FetchResult> {
   const base = (draft.baseUrl ?? DEFAULT_BASE_URLS.gemini!)
     .replace(/\/openai\/?$/, "")
     .replace(/\/+$/, "");
-  const url = `${base}/models?key=${encodeURIComponent(draft.apiKey)}&pageSize=200`;
-  const resp = await requestUrl({ url, method: "GET", throw: false });
+  // M-2 (AUDIT 2026-06-29): API key in x-goog-api-key header instead
+  // of ?key= query string (which would leak via access logs).
+  const url = `${base}/models?pageSize=200`;
+  const resp = await requestUrl({
+    url,
+    method: "GET",
+    headers: { "x-goog-api-key": draft.apiKey },
+    throw: false,
+  });
   if (resp.status >= 300) {
     return {
       ok: false,

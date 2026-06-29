@@ -102,7 +102,7 @@ export class OpenAICompatibleProvider implements ApiHandler {
     if (this.provider.type === "openrouter") {
       headers["HTTP-Referer"] =
         headers["HTTP-Referer"] ??
-        "https://github.com/pssah4/frontmatter-editor-dev";
+        "https://github.com/pssah4/frontmatter-editor";
       headers["X-Title"] = headers["X-Title"] ?? "Frontmatter Editor";
     }
 

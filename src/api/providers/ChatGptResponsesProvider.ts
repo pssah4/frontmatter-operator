@@ -13,6 +13,7 @@
  * chunks into the final text and pick up usage from response.completed.
  */
 
+import { Platform } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import type {
   CompletionRequest,
@@ -83,7 +84,21 @@ export class ChatGptResponsesProvider implements ApiHandler {
     private provider: ProviderConfig,
     private model: RunModelOptions,
     private plugin: FrontmatterEditorPlugin,
-  ) {}
+  ) {
+    // L-1 ZT (AUDIT 2026-06-29): the Codex backend requires raw
+    // Node `https` (loaded via window.require) for SSE streaming;
+    // Obsidian's `requestUrl` cannot stream and window.require is
+    // a desktop-only Electron API. On mobile this throws a
+    // confusing "require is not a function" mid-call. Fail clean
+    // at construction so the user sees a clear setting-level
+    // error instead.
+    if (Platform.isMobile) {
+      throw new ProviderError(
+        "ChatGPT (OAuth) requires desktop Obsidian -- the Codex backend streams Server-Sent Events that the mobile transport cannot handle. Use a different provider for mobile.",
+        "chatgpt-oauth",
+      );
+    }
+  }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     const input: ResponsesInputItem[] = req.messages.map((m) => ({

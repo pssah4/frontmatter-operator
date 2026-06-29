@@ -24,6 +24,11 @@ import {
   migrateLegacyCustomPrompt,
 } from "./types/generators";
 import { SafeStorageService } from "./auth/SafeStorageService";
+import {
+  assertNoPlaintextSecrets,
+  decryptSettingsAfterLoad,
+  encryptSettingsForSave,
+} from "./auth/encryptSettings";
 import { GitHubCopilotAuthService } from "./auth/GitHubCopilotAuthService";
 import { ChatGptOAuthService } from "./auth/ChatGptOAuthService";
 import { KiloAuthService } from "./auth/KiloAuthService";
@@ -41,6 +46,10 @@ export default class FrontmatterEditorPlugin extends Plugin {
   kiloAuth!: KiloAuthService;
 
   async onload(): Promise<void> {
+    // H-1: SafeStorage must exist BEFORE loadSettings so the decrypt
+    // step has its keychain handle. Construction is sync and has no
+    // dependencies, so safe to do before loadData.
+    this.safeStorage = new SafeStorageService();
     await this.loadSettings();
 
     this.scanner = new FrontmatterScanner(this.app);
@@ -53,7 +62,6 @@ export default class FrontmatterEditorPlugin extends Plugin {
       this.snapshots,
     );
 
-    this.safeStorage = new SafeStorageService();
     this.copilotAuth = new GitHubCopilotAuthService(this);
     this.chatgptAuth = new ChatGptOAuthService(this);
     this.kiloAuth = new KiloAuthService(this);
@@ -245,6 +253,11 @@ export default class FrontmatterEditorPlugin extends Plugin {
         .map((c) => migrateLegacyCustomPrompt(c))
         .filter((c): c is NonNullable<typeof c> => c !== null),
     };
+    // H-1 (AUDIT 2026-06-29): decrypt every long-lived secret that
+    // was encrypted by a previous save. Plaintext values from before
+    // this fix shipped pass through unchanged and get re-encrypted
+    // on the next saveSettings -- one-shot, no explicit migration.
+    decryptSettingsAfterLoad(this.settings, this.safeStorage);
     // Drop the legacy `models` array if it's still in data.json -- the new
     // schema is provider-centric and incompatible with the old per-model
     // entity. Users re-add via "+ Add provider".
@@ -254,7 +267,27 @@ export default class FrontmatterEditorPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    // H-1: encrypt every secret field before the settings hit disk.
+    // The encrypt helper deep-clones first so in-memory state stays
+    // plaintext (every consumer accesses tokens/keys via
+    // this.settings.* and would crash if it got an "enc:v1:..."
+    // value). If safeStorage is unavailable (mobile / no keychain),
+    // SafeStorageService emits a Notice and returns the plaintext
+    // unchanged -- documented degradation, not a silent failure.
+    const onDisk = encryptSettingsForSave(this.settings, this.safeStorage);
+    if (this.safeStorage.isAvailable()) {
+      // Defence-in-depth: assert no plaintext slipped through any
+      // future newly-added secret field. In production this just
+      // logs a warning; tests promote it to a hard failure.
+      const offenders = assertNoPlaintextSecrets(onDisk);
+      if (offenders.length > 0) {
+        console.warn(
+          "frontmatter-editor: plaintext secret fields detected on save:",
+          offenders,
+        );
+      }
+    }
+    await this.saveData(onDisk);
   }
 
   private mergePresets(stored?: typeof DEFAULT_PRESETS): typeof DEFAULT_PRESETS {
