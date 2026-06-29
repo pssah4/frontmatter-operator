@@ -44,6 +44,15 @@ export interface GeneratorRunOptions {
   language: GeneratorLanguage;
   /** Notes to process. */
   targets: TFile[];
+  /**
+   * L (AUDIT 2026-06-29): caller-supplied abort signal. When fired,
+   * the per-note loop checks signal.aborted at the top of each
+   * iteration and returns early with the partial result. Inner
+   * SDK calls also receive the signal so an in-flight API request
+   * is cut. Without this a wrong-preset run over 1000 notes is
+   * uncancellable short of a plugin reload (cost implications).
+   */
+  abortSignal?: AbortSignal;
   /** Optional, used by the moc preset to ground the LLM in existing topics. */
   knownTopics?: string[];
   knownConcepts?: string[];
@@ -93,6 +102,21 @@ export class GeneratorService {
     const systemPrompt = GENERATOR_GUARDRAIL[opts.language];
 
     for (let i = 0; i < opts.targets.length; i++) {
+      // L AbortSignal (AUDIT 2026-06-29): per-iteration abort check.
+      // A wrong-preset 1000-note run is now cancellable mid-loop;
+      // the partial result returned includes whatever was already
+      // written + the remaining notes counted as skipped.
+      if (opts.abortSignal?.aborted) {
+        const remaining = opts.targets.length - i;
+        result.skippedCount += remaining;
+        for (let j = i; j < opts.targets.length; j++) {
+          result.skipped.push({
+            path: opts.targets[j].path,
+            reason: "cancelled by user",
+          });
+        }
+        return result;
+      }
       const file = opts.targets[i];
       opts.onProgress?.(i + 1, opts.targets.length, file);
 
@@ -132,8 +156,18 @@ export class GeneratorService {
         continue;
       }
 
+      // L-1 LLM (AUDIT 2026-06-29): wrap the vault note body in an
+      // explicit untrusted-input delimiter so the model treats it
+      // as data, not as additional instructions. Strips ASCII
+      // control characters (other than \\n, \\r, \\t) to defeat
+      // common prompt-injection payloads that hide markers in
+      // non-printable bytes. The wrapper is informational -- there's
+      // no hard guarantee against a determined injection -- but it
+      // raises the bar materially.
+      const safeBody = sanitiseForPrompt(body.slice(0, MAX_BODY_CHARS));
+      const wrappedBody = `<note_body_untrusted>\n${safeBody}\n</note_body_untrusted>`;
       const userPrompt = interpolate(userPromptTemplate, {
-        NOTE_BODY: body.slice(0, MAX_BODY_CHARS),
+        NOTE_BODY: wrappedBody,
         NOTE_TITLE: file.basename,
         KNOWN_TOPICS: (opts.knownTopics ?? []).join(", "),
         KNOWN_CONCEPTS: (opts.knownConcepts ?? []).join(", "),
@@ -590,6 +624,17 @@ export function sanitizeExistingListString(existing: string[]): string[] {
   if (existing.length === 0) return existing;
   if (listLooksLikeRefusal(existing)) return [];
   return existing.filter((it) => !isRefusalItem(it));
+}
+
+/**
+ * L-1 LLM (AUDIT 2026-06-29): strip ASCII control characters from
+ * vault content before it lands in the LLM prompt. Keeps \\n, \\r,
+ * \\t (line breaks + indentation matter for body comprehension);
+ * drops every other 0x00-0x1F + 0x7F. Defends against prompt
+ * injections that hide instructions in non-printable bytes.
+ */
+function sanitiseForPrompt(s: string): string {
+  return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
 function interpolate(template: string, vars: Record<string, string>): string {

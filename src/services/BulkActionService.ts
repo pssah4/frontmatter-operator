@@ -29,6 +29,24 @@ function cloneFrontmatter(fm: Frontmatter): Frontmatter {
   return JSON.parse(JSON.stringify(fm));
 }
 
+/**
+ * L-3 ZT (AUDIT 2026-06-29): structural equality on two frontmatter
+ * snapshots. Skips the Obsidian-internal `position` key (gets
+ * re-derived on every parse). JSON.stringify is enough -- both
+ * sides are pure data (strings, numbers, arrays, plain objects).
+ */
+function frontmatterEqual(a: Frontmatter, b: Frontmatter): boolean {
+  const normalise = (fm: Frontmatter): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fm)) {
+      if (k === "position") continue;
+      out[k] = v;
+    }
+    return out;
+  };
+  return JSON.stringify(normalise(a)) === JSON.stringify(normalise(b));
+}
+
 function isEmpty(v: unknown): boolean {
   if (v === undefined || v === null) return true;
   if (Array.isArray(v)) return v.length === 0;
@@ -238,8 +256,29 @@ export class BulkActionService {
 
     let done = 0;
     const total = predictedChanges.length;
-    for (const { row } of predictedChanges) {
+    for (const { row, entry } of predictedChanges) {
       try {
+        // L-3 ZT (AUDIT 2026-06-29): race guard. The snapshot's
+        // `before` was captured from the scan-time NoteRow; if
+        // another process (Templater, Sync, the user) edited the
+        // file between scan and now, blindly applying our diff
+        // would silently overwrite their change AND the snapshot's
+        // restore would put back the wrong "before". Re-read the
+        // current frontmatter and skip if it diverges from the
+        // snapshot. The before-state preserved in the snapshot is
+        // still correct for any notes that DID pass this check.
+        const fresh = this.app.metadataCache.getFileCache(row.file)?.frontmatter;
+        if (fresh && !frontmatterEqual(fresh, entry.before ?? {})) {
+          result.skippedCount++;
+          result.errors.push({
+            path: row.path,
+            message:
+              "skipped: note was modified between scan and write (concurrent edit)",
+          });
+          done++;
+          onProgress?.(done, total);
+          continue;
+        }
         await this.writeFrontmatter(row.file, action);
         result.successCount++;
       } catch (err) {

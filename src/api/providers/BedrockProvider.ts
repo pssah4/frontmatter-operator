@@ -31,6 +31,7 @@ import type {
 } from "../../types/llm";
 import { ProviderError, recommendedMaxTokens } from "../../types/llm";
 import type { ApiHandler } from "../types";
+import { assertValidHeader } from "../headerValidation";
 
 const DEFAULT_GATEWAY_HEADER_NAME = "Ocp-Apim-Subscription-Key";
 
@@ -138,6 +139,19 @@ export class BedrockProvider implements ApiHandler {
       const headerName =
         provider.gatewayHeaderName?.trim() || DEFAULT_GATEWAY_HEADER_NAME;
       const headerValue = provider.gatewayHeaderValue!.trim();
+      // L-4 SAST (AUDIT 2026-06-29): validate RFC 7230 token name +
+      // printable-ASCII value at construction so a fat-finger header
+      // name surfaces a clean error instead of an opaque Node
+      // TypeError mid-request. Also blocks Host / Content-Length /
+      // Authorization overrides.
+      try {
+        assertValidHeader(headerName, headerValue);
+      } catch (err) {
+        throw new ProviderError(
+          `Bedrock gateway header invalid: ${err instanceof Error ? err.message : String(err)}`,
+          "bedrock",
+        );
+      }
       this.client.middlewareStack.add(
         (next) => async (args) => {
           const request = (

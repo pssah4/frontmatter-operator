@@ -25,7 +25,10 @@ export class GeminiProvider implements ApiHandler {
     const host = (
       this.provider.baseUrl?.replace(/\/openai\/?$/, "") ?? DEFAULT_HOST
     ).replace(/\/+$/, "");
-    const url = `${host}/models/${this.model.modelId}:generateContent?key=${encodeURIComponent(this.provider.apiKey)}`;
+    // M-2 (AUDIT 2026-06-29): API key in the x-goog-api-key header
+    // instead of the query string. Google's v1beta accepts both;
+    // the query-string form leaks via proxy/server access logs.
+    const url = `${host}/models/${this.model.modelId}:generateContent`;
 
     const contents = req.messages.map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
@@ -45,7 +48,10 @@ export class GeminiProvider implements ApiHandler {
     const request: RequestUrlParam = {
       url,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": this.provider.apiKey,
+      },
       body: JSON.stringify(body),
       throw: false,
     };

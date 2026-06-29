@@ -11,6 +11,7 @@ import {
   recommendedMaxTokens,
 } from "../../types/llm";
 import type { ApiHandler } from "../types";
+import { assertValidHeader } from "../headerValidation";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -62,7 +63,13 @@ export class AnthropicProvider implements ApiHandler {
       "anthropic-version": ANTHROPIC_VERSION,
     };
     if (this.provider.useGateway && this.provider.gatewayHeaderName) {
-      headers[this.provider.gatewayHeaderName] = this.provider.gatewayHeaderValue ?? "";
+      // L-4 SAST (AUDIT 2026-06-29): validate header name + value
+      // before injection. Throws a clean error if the user typed
+      // an invalid RFC 7230 token or tried to overwrite a reserved
+      // header (Host, Authorization, etc.).
+      const headerValue = this.provider.gatewayHeaderValue ?? "";
+      assertValidHeader(this.provider.gatewayHeaderName, headerValue);
+      headers[this.provider.gatewayHeaderName] = headerValue;
     }
     if (this.provider.apiKey) headers["x-api-key"] = this.provider.apiKey;
 

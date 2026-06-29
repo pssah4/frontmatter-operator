@@ -1,7 +1,16 @@
 import type { App, Vault } from "obsidian";
 import type { Snapshot, BulkAction, Frontmatter } from "../types";
+import { BULK_ACTION_TYPES } from "../types";
 
-const SNAPSHOT_DIR = ".frontmatter-editor/snapshots";
+// M-7 (AUDIT 2026-06-29): snapshot dir was previously vault-relative
+// (".frontmatter-editor/snapshots") so every snapshot got mirrored to
+// iCloud/Dropbox/Git/Syncthing along with the rest of the vault --
+// each snapshot contains pre-mutation frontmatter the user wanted
+// removed. Moving under vault.configDir/plugins/frontmatter-editor/
+// keeps the snapshots adjacent to data.json and inherits Obsidian's
+// own plugin-data exclusion from sync. The legacy path is migrated
+// on first call to ensureDir() so existing snapshots are preserved.
+const LEGACY_SNAPSHOT_DIR = ".frontmatter-editor/snapshots";
 const MAX_SNAPSHOTS = 50;
 
 // HARD-01: strict snapshot id format. Generated ids follow YYYYMMDD-HHMMSS-XXXX
@@ -24,13 +33,13 @@ export function parseSnapshot(raw: unknown): Snapshot | null {
   }
   if (!o.action || typeof o.action !== "object") return null;
   const action = o.action as { type?: unknown };
-  if (
-    action.type !== "set" &&
-    action.type !== "delete" &&
-    action.type !== "rename" &&
-    action.type !== "copy" &&
-    action.type !== "move"
-  ) {
+  // H-5 (AUDIT 2026-06-29): derive the allow-list from
+  // BULK_ACTION_TYPES so a newly-added action type can't silently
+  // disappear from disk-loaded snapshots. The previous hard-coded
+  // tuple missed "transfer" entirely, breaking Undo across restarts
+  // for the primary new action type.
+  if (typeof action.type !== "string") return null;
+  if (!(BULK_ACTION_TYPES as readonly string[]).includes(action.type)) {
     return null;
   }
   if (!Array.isArray(o.entries)) return null;
@@ -56,9 +65,73 @@ export class SnapshotService {
     return this.vault.adapter;
   }
 
+  /**
+   * Plugin-private snapshot dir. Under vault.configDir/plugins/...
+   * so it inherits Obsidian's exclusion from vault sync. Lazy --
+   * uses app.vault.configDir which is the path Obsidian itself uses
+   * for its own state, so respects the user's vault override too.
+   */
+  private get snapshotDir(): string {
+    return `${this.vault.configDir}/plugins/frontmatter-editor/snapshots`;
+  }
+
   async ensureDir(): Promise<void> {
-    if (!(await this.adapter.exists(SNAPSHOT_DIR))) {
-      await this.adapter.mkdir(SNAPSHOT_DIR);
+    if (!(await this.adapter.exists(this.snapshotDir))) {
+      await this.adapter.mkdir(this.snapshotDir);
+    }
+    // M-7 migration: move every snapshot file from the legacy
+    // vault-relative dir to the new plugin-private one, then delete
+    // the legacy dir. Idempotent: if the legacy dir is missing, do
+    // nothing. Runs on every save's ensureDir but the existence
+    // check makes it free after the first migration.
+    await this.migrateLegacySnapshots();
+  }
+
+  private async migrateLegacySnapshots(): Promise<void> {
+    if (!(await this.adapter.exists(LEGACY_SNAPSHOT_DIR))) return;
+    try {
+      const listing = await this.adapter.list(LEGACY_SNAPSHOT_DIR);
+      for (const f of listing.files) {
+        if (!f.endsWith(".json")) continue;
+        const name = f.split("/").pop()!;
+        const dest = `${this.snapshotDir}/${name}`;
+        if (await this.adapter.exists(dest)) {
+          await this.adapter.remove(f);
+          continue;
+        }
+        try {
+          const raw = await this.adapter.read(f);
+          await this.adapter.write(dest, raw);
+          await this.adapter.remove(f);
+        } catch (err) {
+          console.warn(
+            "frontmatter-editor: snapshot migration failed for",
+            f,
+            err,
+          );
+        }
+      }
+      const after = await this.adapter.list(LEGACY_SNAPSHOT_DIR);
+      if (after.files.length === 0 && after.folders.length === 0) {
+        await this.adapter.rmdir(LEGACY_SNAPSHOT_DIR, false);
+        // Try to delete the parent .frontmatter-editor folder too if it's
+        // now empty -- it was created solely for this snapshot dir.
+        const parent = ".frontmatter-editor";
+        if (await this.adapter.exists(parent)) {
+          const parentListing = await this.adapter.list(parent);
+          if (
+            parentListing.files.length === 0 &&
+            parentListing.folders.length === 0
+          ) {
+            await this.adapter.rmdir(parent, false);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "frontmatter-editor: snapshot migration failed (will retry)",
+        err,
+      );
     }
   }
 
@@ -88,8 +161,8 @@ export class SnapshotService {
   }
 
   async list(): Promise<Snapshot[]> {
-    if (!(await this.adapter.exists(SNAPSHOT_DIR))) return [];
-    const listing = await this.adapter.list(SNAPSHOT_DIR);
+    if (!(await this.adapter.exists(this.snapshotDir))) return [];
+    const listing = await this.adapter.list(this.snapshotDir);
     const files = listing.files.filter((f) => f.endsWith(".json"));
     const snaps: Snapshot[] = [];
     for (const f of files) {
@@ -132,7 +205,7 @@ export class SnapshotService {
   }
 
   private pathFor(id: string): string {
-    return `${SNAPSHOT_DIR}/${id}.json`;
+    return `${this.snapshotDir}/${id}.json`;
   }
 
   private async prune(): Promise<void> {

@@ -38,6 +38,26 @@ import {
 /** Frontmatter keys we never touch even if they look suspicious. */
 const RESERVED_KEYS = new Set(["position", "tags-meta"]);
 
+/**
+ * L-2 LLM (AUDIT 2026-06-29): default cleanup scope -- only the
+ * properties that a generator preset can target. Without this, a
+ * legitimate non-generator value containing one of the
+ * KNOWN_REFUSAL_SUBSTRINGS phrases would be silently stripped on a
+ * vault-wide scan. Pass `scope: "all"` to opt into the broader sweep
+ * (legacy v2 behaviour) when a user explicitly suspects pollution in
+ * other keys.
+ */
+const DEFAULT_TARGET_PROPERTIES: ReadonlySet<string> = new Set([
+  "tags",
+  "keywords",
+  "aliases",
+  "topics",
+  "concepts",
+  "moc",
+  "description",
+  "summary",
+]);
+
 export interface CleanupReport {
   notesScanned: number;
   notesTouched: number;
@@ -54,9 +74,17 @@ export interface CleanupReport {
 }
 
 export interface CleanupOptions {
-  /** If set, restrict the scan to this property. Default: scan ALL
-   *  non-reserved frontmatter keys on every note. */
+  /** If set, restrict the scan to this property. Overrides scope. */
   property?: string;
+  /**
+   * Default "targeted" -- scan only the curated set of properties
+   * that a generator preset can write to (tags, keywords, aliases,
+   * topics, concepts, moc, description, summary). Pass "all" to
+   * scan every non-reserved frontmatter key on every note (the
+   * legacy v2 behaviour, kept for the rare case where a user's
+   * pollution lives outside the generator-target set).
+   */
+  scope?: "targeted" | "all";
   dryRun?: boolean;
   onProgress?: (current: number, total: number, file: TFile) => void;
 }
@@ -70,6 +98,7 @@ export class RefusalTagCleanupService {
   async run(opts: CleanupOptions = {}): Promise<CleanupReport> {
     const dryRun = opts.dryRun ?? false;
     const scopedProperty = opts.property;
+    const scope = opts.scope ?? "targeted";
     const files = this.app.vault.getMarkdownFiles();
     const perNote: CleanupReport["perNote"] = [];
     const propertiesAffected: Record<string, number> = {};
@@ -92,7 +121,18 @@ export class RefusalTagCleanupService {
       const patches: PendingWrite["patches"] = [];
       const propsToScan = scopedProperty
         ? [scopedProperty]
-        : Object.keys(fm).filter((k) => !RESERVED_KEYS.has(k));
+        : Object.keys(fm).filter((k) => {
+            if (RESERVED_KEYS.has(k)) return false;
+            // L-2 LLM (AUDIT 2026-06-29): default scope is the
+            // curated generator-target set, so a legitimate value
+            // containing the words "cannot generate" elsewhere
+            // doesn't get silently stripped. Opt into the full
+            // sweep via scope: "all".
+            if (scope === "targeted" && !DEFAULT_TARGET_PROPERTIES.has(k)) {
+              return false;
+            }
+            return true;
+          });
 
       for (const prop of propsToScan) {
         const raw = fm[prop];
