@@ -1,25 +1,28 @@
 /**
- * RefusalTagCleanupService -- one-shot maintenance scan that finds
- * notes whose `tags` (or any other list-typed) frontmatter property
- * was polluted by a pre-detector Generate-with-AI run and silently
+ * RefusalTagCleanupService -- vault-wide scan that finds refusal-
+ * shaped strings in any frontmatter property (not just `tags`) and
  * cleans them, snapshot-undoable.
  *
- * Triggered by the plugin command "Clean refusal text from tags
- * across the vault" (added in main.ts) and by the Maintenance button
- * in Settings. Not part of the BulkAction discriminated union --
- * this is a one-shot cleanup, not a composable user action.
+ * v2: scope expanded after the v1 "Nothing to clean" report --
+ * pollution turned out to live in properties other than `tags` (or
+ * as string values rather than arrays). The new pass:
+ *   - inspects EVERY frontmatter key on every note (skip __virtual
+ *     properties and the reserved `position` key)
+ *   - for ARRAY values: per-item isRefusalItem filter
+ *   - for STRING values: if the whole string looks like a refusal
+ *     (looksLikeRefusal or contains a KNOWN_REFUSAL_SUBSTRING),
+ *     delete the property entirely. If the string is a comma-
+ *     separated chain of refusal sentences (the parser's fallback
+ *     shape), the same check still catches it.
+ *   - non-string/non-array values pass through untouched.
+ * Empty values left over by the filter are deleted, not stored as
+ * `[]` or `""`.
  *
- * Filter logic per item:
- *   1. If looksLikeKeyword(item) === false -> drop. Catches sentence-
- *      shaped strings ("Based on the note content...", "I need to
- *      see...") that no real keyword could ever produce.
- *   2. If item's lowercase contains any KNOWN_REFUSAL_SUBSTRINGS ->
- *      drop. Catches refusals that happen to fit the keyword shape
- *      but are still obvious refusals ("unable to generate").
+ * Result includes a per-note breakdown and a per-property summary so
+ * the user sees WHICH properties were affected -- a "tags + 0" report
+ * was previously the only feedback when the leak lived elsewhere.
  *
- * If the WHOLE list reads as a refusal via listLooksLikeRefusal,
- * drop every item (saves the noise of partial cleanups on fully
- * polluted notes).
+ * Snapshot-undoable via existing SnapshotService.
  */
 
 import type { App, TFile } from "obsidian";
@@ -29,24 +32,32 @@ import {
   KNOWN_REFUSAL_SUBSTRINGS,
   isRefusalItem,
   listLooksLikeRefusal,
+  looksLikeRefusal,
 } from "./generator/GeneratorService";
+
+/** Frontmatter keys we never touch even if they look suspicious. */
+const RESERVED_KEYS = new Set(["position", "tags-meta"]);
 
 export interface CleanupReport {
   notesScanned: number;
   notesTouched: number;
   itemsRemoved: number;
+  propertiesAffected: Record<string, number>;
   /** Per-note removal log; empty when dryRun=true and no removals. */
-  perNote: Array<{ path: string; removed: string[] }>;
-  /** Snapshot id (when dryRun=false and any note was touched). */
+  perNote: Array<{
+    path: string;
+    property: string;
+    removed: string[];
+    wholeStringRemoved?: string;
+  }>;
   snapshotId?: string;
 }
 
 export interface CleanupOptions {
-  /** Frontmatter key to scan. Default "tags". */
+  /** If set, restrict the scan to this property. Default: scan ALL
+   *  non-reserved frontmatter keys on every note. */
   property?: string;
-  /** If true, count what WOULD be removed without writing. */
   dryRun?: boolean;
-  /** Progress callback per file (current, total, file). */
   onProgress?: (current: number, total: number, file: TFile) => void;
 }
 
@@ -57,46 +68,110 @@ export class RefusalTagCleanupService {
   ) {}
 
   async run(opts: CleanupOptions = {}): Promise<CleanupReport> {
-    const property = opts.property ?? "tags";
     const dryRun = opts.dryRun ?? false;
+    const scopedProperty = opts.property;
     const files = this.app.vault.getMarkdownFiles();
     const perNote: CleanupReport["perNote"] = [];
-    const writeQueue: Array<{ file: TFile; clean: string[]; before: unknown }> = [];
+    const propertiesAffected: Record<string, number> = {};
+
+    interface PendingWrite {
+      file: TFile;
+      patches: Array<{
+        property: string;
+        nextValue: unknown | undefined; // undefined = delete the key
+      }>;
+    }
+    const writeQueue: PendingWrite[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       opts.onProgress?.(i + 1, files.length, file);
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       if (!fm) continue;
-      const raw = fm[property];
-      if (!Array.isArray(raw)) continue;
-      const items = raw.map((v) => (typeof v === "string" ? v : String(v)));
-      if (items.length === 0) continue;
 
-      // Decide what to keep.
-      const wholeList = listLooksLikeRefusal(items);
-      const clean = wholeList ? [] : items.filter((it) => !isRefusalItem(it));
-      const removed = items.filter((it) => !clean.includes(it));
-      if (removed.length === 0) continue;
+      const patches: PendingWrite["patches"] = [];
+      const propsToScan = scopedProperty
+        ? [scopedProperty]
+        : Object.keys(fm).filter((k) => !RESERVED_KEYS.has(k));
 
-      perNote.push({ path: file.path, removed });
-      writeQueue.push({
-        file,
-        clean,
-        before: raw,
-      });
+      for (const prop of propsToScan) {
+        const raw = fm[prop];
+        if (raw === undefined || raw === null) continue;
+
+        // ---- array values ----
+        if (Array.isArray(raw)) {
+          const items = raw.map((v) => (typeof v === "string" ? v : String(v)));
+          if (items.length === 0) continue;
+          const wholeList = listLooksLikeRefusal(items);
+          const clean = wholeList ? [] : items.filter((it) => !isRefusalItem(it));
+          if (clean.length === items.length) continue;
+          const removed = items.filter((it) => !clean.includes(it));
+          patches.push({
+            property: prop,
+            nextValue: clean.length === 0 ? undefined : clean,
+          });
+          perNote.push({ path: file.path, property: prop, removed });
+          propertiesAffected[prop] = (propertiesAffected[prop] ?? 0) + 1;
+          continue;
+        }
+
+        // ---- string values ----
+        if (typeof raw === "string") {
+          const s = raw.trim();
+          if (s.length === 0) continue;
+          // Whole-string refusal? Drop the property.
+          if (looksLikeRefusal(s) || isRefusalItem(s)) {
+            patches.push({ property: prop, nextValue: undefined });
+            perNote.push({
+              path: file.path,
+              property: prop,
+              removed: [],
+              wholeStringRemoved: s,
+            });
+            propertiesAffected[prop] = (propertiesAffected[prop] ?? 0) + 1;
+            continue;
+          }
+          // Comma-separated chain of refusal sentences? Split + check.
+          if (s.includes(",")) {
+            const parts = s
+              .split(",")
+              .map((p) => p.trim())
+              .filter((p) => p.length > 0);
+            if (parts.length >= 2 && listLooksLikeRefusal(parts)) {
+              patches.push({ property: prop, nextValue: undefined });
+              perNote.push({
+                path: file.path,
+                property: prop,
+                removed: parts,
+                wholeStringRemoved: s,
+              });
+              propertiesAffected[prop] = (propertiesAffected[prop] ?? 0) + 1;
+              continue;
+            }
+          }
+        }
+        // Other types (number, boolean, nested object) skipped.
+      }
+
+      if (patches.length > 0) writeQueue.push({ file, patches });
     }
 
     const report: CleanupReport = {
       notesScanned: files.length,
       notesTouched: writeQueue.length,
-      itemsRemoved: perNote.reduce((acc, e) => acc + e.removed.length, 0),
+      itemsRemoved:
+        perNote.reduce((acc, e) => acc + e.removed.length, 0) +
+        perNote.filter((e) => e.wholeStringRemoved).length,
+      propertiesAffected,
       perNote,
     };
 
     if (dryRun || writeQueue.length === 0) return report;
 
-    // Snapshot before any write so the whole batch is one undoable op.
+    // Snapshot every touched note's complete frontmatter so undo
+    // restores the EXACT pre-cleanup state, regardless of which keys
+    // we mutated. Uses the existing SnapshotService + the standard
+    // restoreSnapshot replay path in BulkActionService.
     const snapshotId = `cleanup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const snapshotEntries: Snapshot["entries"] = writeQueue.map(({ file }) => {
       const cache = this.app.metadataCache.getFileCache(file);
@@ -107,25 +182,28 @@ export class RefusalTagCleanupService {
           : null,
       };
     });
-    // Use a synthesized "delete" action shape so the existing
-    // SnapshotsModal renders something readable for the entry; the
-    // actual undo replay restores `before` per entry regardless of
-    // the action shape (see BulkActionService.restoreSnapshot).
     const snap: Snapshot = {
       id: snapshotId,
       createdAt: new Date().toISOString(),
-      action: { type: "delete", properties: [property] },
+      // Synthetic delete-shaped action so the existing snapshot UI
+      // can render something readable; undo replays per-entry
+      // `before` verbatim regardless of action shape.
+      action: {
+        type: "delete",
+        properties: Object.keys(propertiesAffected),
+      },
       entries: snapshotEntries,
     };
     await this.snapshots.save(snap);
 
-    // Now do the writes.
-    for (const entry of writeQueue) {
-      await this.app.fileManager.processFrontMatter(entry.file, (fm) => {
-        if (entry.clean.length === 0) {
-          delete fm[property];
-        } else {
-          fm[property] = entry.clean as never;
+    for (const { file, patches } of writeQueue) {
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        for (const patch of patches) {
+          if (patch.nextValue === undefined) {
+            delete fm[patch.property];
+          } else {
+            fm[patch.property] = patch.nextValue as never;
+          }
         }
       });
     }
@@ -135,6 +213,4 @@ export class RefusalTagCleanupService {
   }
 }
 
-// Re-export so the cleanup command + settings tab can import only
-// from this file.
 export { KNOWN_REFUSAL_SUBSTRINGS };

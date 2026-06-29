@@ -181,24 +181,47 @@ export default class FrontmatterEditorPlugin extends Plugin {
       "./services/RefusalTagCleanupService"
     );
     const service = new RefusalTagCleanupService(this.app, this.snapshots);
+    // Scan EVERY frontmatter property (not just `tags`). The user's
+    // 476-note leak from the previous run was in part not in `tags`
+    // at all -- the v1 cleanup defaulted to that one key and reported
+    // "nothing to clean". v2 scans all keys.
     const dry = await service.run({ dryRun: true });
     if (dry.notesTouched === 0) {
       new Notice(
-        `Refusal-tag cleanup: scanned ${dry.notesScanned} notes, nothing to clean.`,
+        `Refusal-tag cleanup: scanned ${dry.notesScanned} notes, nothing to clean across any frontmatter property.`,
+        8000,
+      );
+      // Diagnostic: dump the structure of the first few notes that
+      // have ANY frontmatter so the user can see what we're actually
+      // looking at. Helps when the user expected hits but got none.
+      console.debug(
+        "[frontmatter-editor] cleanup dry-run report:",
+        dry,
       );
       return;
     }
+    const propsAffected = Object.entries(dry.propertiesAffected)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `${k} (${n})`)
+      .join(", ");
     const ok = window.confirm(
-      `Clean refusal text from tags across the vault?\n\n` +
-        `${dry.notesTouched} of ${dry.notesScanned} notes will be modified ` +
-        `(${dry.itemsRemoved} items removed). A snapshot is saved so the ` +
-        `action is undoable via "Undo last frontmatter action".`,
+      `Clean refusal text from frontmatter across the vault?\n\n` +
+        `Notes affected: ${dry.notesTouched} of ${dry.notesScanned}\n` +
+        `Items removed:  ${dry.itemsRemoved}\n` +
+        `Properties:     ${propsAffected}\n\n` +
+        `A snapshot is saved so the cleanup is undoable via ` +
+        `"Undo last frontmatter action".`,
     );
     if (!ok) return;
     const real = await service.run({ dryRun: false });
     new Notice(
-      `Refusal-tag cleanup: cleaned ${real.notesTouched}/${real.notesScanned} notes, ` +
-        `removed ${real.itemsRemoved} items. Undo via "Undo last frontmatter action".`,
+      `Cleanup done: ${real.notesTouched}/${real.notesScanned} notes, ` +
+        `${real.itemsRemoved} items removed. Undo via "Undo last frontmatter action".`,
+      10_000,
+    );
+    console.debug(
+      "[frontmatter-editor] cleanup write report:",
+      real,
     );
   }
 
