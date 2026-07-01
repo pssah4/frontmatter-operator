@@ -1,9 +1,9 @@
 {
-  "id": "frontmatter-editor",
-  "name": "Frontmatter Editor",
-  "version": "0.2.0",
-  "minAppVersion": "1.5.0",
-  "description": "Bulk-edit YAML frontmatter across the vault. Filter notes by property conditions, then set, delete, rename, copy or merge properties. Every action is snapshotted and undoable. Exposes a typed programmatic API (`app.plugins.plugins['frontmatter-editor'].api`) and 8 commands (set-property, delete-properties, rename-property, copy-property, merge-properties, undo-last, open-snapshots, list-properties) so agents and scripts can use it without the UI.",
+  "id": "frontmatter-operator",
+  "name": "Frontmatter Operator",
+  "version": "1.0.0",
+  "minAppVersion": "1.7.2",
+  "description": "Bulk-edit YAML frontmatter across the vault: filter notes by property, then set, rename, copy, merge or delete properties with snapshot-based undo. Ideal for OKF (Open Knowledge Format) migration; exposes a typed API for AI agents.",
   "author": "Sebastian Hanke",
   "authorUrl": "https://github.com/pssah4",
   "isDesktopOnly": false

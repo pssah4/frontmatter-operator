@@ -31,6 +31,9 @@ export interface GeneratorPreset {
   prompts: Record<GeneratorLanguage, string>;
   /** True for the three built-in presets so users can reset them. */
   isBuiltIn: boolean;
+  /** When false, the prompt is hidden from the Generate-with-AI picker.
+   *  Absent = enabled (back-compat with existing settings). */
+  enabled?: boolean;
 }
 
 /**
@@ -580,6 +583,8 @@ export interface CustomPromptTemplate {
   targetProperty: string;
   parser: GeneratorParserId;
   prompt: string;
+  /** When false, hidden from the Generate-with-AI picker. Absent = enabled. */
+  enabled?: boolean;
 }
 
 export function emptyCustomPrompt(targetProperty: string): CustomPromptTemplate {
@@ -592,6 +597,7 @@ export function emptyCustomPrompt(targetProperty: string): CustomPromptTemplate 
     targetProperty,
     parser: "single_line_text",
     prompt: "",
+    enabled: true,
   };
 }
 

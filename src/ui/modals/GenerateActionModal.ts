@@ -1,4 +1,6 @@
-import { App, Modal, Notice, TFile, setIcon } from "obsidian";
+import { App, Notice, TFile, setIcon } from "obsidian";
+import { DraggableModal } from "./DraggableModal";
+import { promptModal } from "./PromptModal";
 import type FrontmatterEditorPlugin from "../../main";
 import type { NoteRow } from "../../types";
 import type {
@@ -34,7 +36,7 @@ export interface GenerateModalOptions {
  * Decode parameters and output-format pickers live elsewhere (preset
  * defaults). Save-as-custom is a small button in the prompt toolbar.
  */
-export class GenerateActionModal extends Modal {
+export class GenerateActionModal extends DraggableModal {
   private opts: GenerateModalOptions;
   private noteScope: NoteScope;
   private promptText: string;
@@ -142,14 +144,16 @@ export class GenerateActionModal extends Modal {
     setIcon(presetWrap.createSpan({ cls: "fm-editor-chat-tool-icon" }), "message-square");
     const presetSelect = presetWrap.createEl("select");
     const builtIns = this.plugin.settings.presets.filter(
-      (p) => p.targetProperty === this.opts.targetProperty,
+      (p) => p.targetProperty === this.opts.targetProperty && p.enabled !== false,
     );
     const customs = this.plugin.settings.customPrompts.filter(
-      (p) => p.targetProperty === this.opts.targetProperty,
+      (p) => p.targetProperty === this.opts.targetProperty && p.enabled !== false,
     );
-    for (const p of builtIns) presetSelect.createEl("option", { value: `built:${p.id}`, text: `Preset: ${p.displayName}` });
-    for (const p of customs) presetSelect.createEl("option", { value: `custom:${p.id}`, text: `Custom: ${p.name}` });
-    presetSelect.createEl("option", { value: "live", text: "Custom prompt" });
+    // "A prompt is a prompt": built-in and saved prompts appear uniformly by
+    // name, no "Preset:"/"Custom:" prefixes.
+    for (const p of builtIns) presetSelect.createEl("option", { value: `built:${p.id}`, text: p.displayName });
+    for (const p of customs) presetSelect.createEl("option", { value: `custom:${p.id}`, text: p.name });
+    presetSelect.createEl("option", { value: "live", text: "Ad-hoc prompt (not saved)" });
     if (this.selectedPresetId) presetSelect.value = this.selectedPresetId;
     presetSelect.addEventListener("change", () => {
       this.selectedPresetId = presetSelect.value;
@@ -233,7 +237,7 @@ export class GenerateActionModal extends Modal {
     const left = footer.createDiv({ cls: "fm-editor-modal-footer-left" });
     const save = left.createEl("button", { cls: "fm-editor-btn" });
     setIcon(save.createSpan(), "bookmark-plus");
-    save.createSpan({ text: "Save as preset" });
+    save.createSpan({ text: "Save as custom prompt" });
     save.addEventListener("click", () => this.saveAsCustomPrompt());
 
     this.statusEl = left.createDiv({ cls: "fm-editor-modal-status" });
@@ -299,10 +303,13 @@ export class GenerateActionModal extends Modal {
   }
 
   private async saveAsCustomPrompt(): Promise<void> {
-    const name = window.prompt(
-      "Name this preset",
-      `My ${this.opts.targetProperty}`,
-    );
+    const name = await promptModal(this.app, {
+      title: "Save as custom prompt",
+      message: "A reusable name for this prompt. It appears in Settings and in the preset dropdown.",
+      placeholder: "e.g. Short German summary",
+      initialValue: `My ${this.opts.targetProperty}`,
+      confirmLabel: "Save",
+    });
     if (!name) return;
     const { emptyCustomPrompt } = await import("../../types/generators");
     const tpl: CustomPromptTemplate = emptyCustomPrompt(this.opts.targetProperty);
@@ -449,7 +456,7 @@ export class GenerateActionModal extends Modal {
         }
       }
       if (result.errors.length > 0) {
-        console.warn("frontmatter-editor: generator errors", result.errors);
+        console.warn("frontmatter-operator: generator errors", result.errors);
         for (const err of result.errors.slice(0, 5)) {
           this.appendChat("assistant", `Error in ${err.path}: ${err.message}`);
         }

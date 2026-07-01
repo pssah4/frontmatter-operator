@@ -1,4 +1,5 @@
-import { App, Modal } from "obsidian";
+import { App } from "obsidian";
+import { DraggableModal } from "./DraggableModal";
 
 interface Recipe {
   title: string;
@@ -89,7 +90,7 @@ const RECIPES: Recipe[] = [
   },
   {
     title: "Undo any action",
-    goal: "Every Apply writes a JSON snapshot to .frontmatter-editor/snapshots/.",
+    goal: "Every Apply writes a JSON snapshot to the plugin data folder (plugins/frontmatter-operator/snapshots/).",
     steps: [
       "Right after the action, the Apply notice carries an Undo button for 12 seconds.",
       "If you missed it, click Undo last in the toolbar (top right).",
@@ -99,7 +100,7 @@ const RECIPES: Recipe[] = [
   },
 ];
 
-export class HelpModal extends Modal {
+export class HelpModal extends DraggableModal {
   constructor(app: App) {
     super(app);
   }
@@ -108,7 +109,7 @@ export class HelpModal extends Modal {
     const { contentEl, titleEl } = this;
     contentEl.empty();
     contentEl.addClass("fm-editor-modal-content");
-    titleEl.setText("How to use Frontmatter Editor");
+    titleEl.setText("How to use Frontmatter Operator");
 
     contentEl.createDiv({
       cls: "fm-editor-help-intro",

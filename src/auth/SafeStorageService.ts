@@ -55,7 +55,7 @@ export class SafeStorageService {
       const buf = this.safeStorage.encryptString(plain);
       return PREFIX + buf.toString("base64");
     } catch (err) {
-      console.warn("frontmatter-editor: safeStorage encrypt failed", err);
+      console.warn("frontmatter-operator: safeStorage encrypt failed", err);
       this.notifyPlaintextFallbackOnce();
       return plain;
     }
@@ -72,7 +72,7 @@ export class SafeStorageService {
       const buf = Buffer.from(base64, "base64");
       return this.safeStorage.decryptString(buf);
     } catch (err) {
-      console.warn("frontmatter-editor: safeStorage decrypt failed", err);
+      console.warn("frontmatter-operator: safeStorage decrypt failed", err);
       return undefined;
     }
   }
@@ -81,7 +81,7 @@ export class SafeStorageService {
     if (warnedThisSession) return;
     warnedThisSession = true;
     new Notice(
-      "Frontmatter Editor: OS keychain unavailable -- API keys are stored as plaintext in this vault's data.json. Restrict file access accordingly.",
+      "Frontmatter Operator: OS keychain unavailable -- API keys are stored as plaintext in this vault's data.json. Restrict file access accordingly.",
       8_000,
     );
   }

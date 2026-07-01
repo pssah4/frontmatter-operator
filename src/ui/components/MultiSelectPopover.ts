@@ -1,3 +1,5 @@
+import { mountFloating, type FloatingHandle } from "../floating";
+
 export interface MultiOption {
   value: string;
   label: string;
@@ -14,17 +16,33 @@ export interface MultiSelectPopoverOpts {
 }
 
 export class MultiSelectPopover {
+  private handle: FloatingHandle | null = null;
   private wrapper!: HTMLElement;
   private input!: HTMLInputElement;
   private list!: HTMLElement;
   private query = "";
-  private boundOutsideClick!: (ev: MouseEvent) => void;
-  private boundKey!: (ev: KeyboardEvent) => void;
 
   constructor(private opts: MultiSelectPopoverOpts) {}
 
+  /**
+   * Open the picker in a body-level floating layer anchored to `anchor`, so it
+   * floats above everything and is never clipped by the scrollable table wrap
+   * or the WHEN bar (both of which clip absolutely-positioned descendants).
+   */
   attach(anchor: HTMLElement): void {
-    this.wrapper = anchor.createDiv({ cls: "fm-multiselect-popover" });
+    this.handle = mountFloating(anchor, (layer) => this.build(layer), {
+      align: "end",
+      gap: 6,
+      onClose: () => {
+        this.handle = null;
+        this.opts.onClose?.();
+      },
+    });
+    window.setTimeout(() => this.input?.focus(), 0);
+  }
+
+  private build(layer: HTMLElement): void {
+    this.wrapper = layer.createDiv({ cls: "fm-multiselect-popover" });
 
     const head = this.wrapper.createDiv({ cls: "fm-multiselect-head" });
     this.input = head.createEl("input", {
@@ -35,11 +53,13 @@ export class MultiSelectPopover {
     this.input.addEventListener("input", () => {
       this.query = this.input.value;
       this.renderList();
+      this.handle?.reposition();
     });
 
-    const counts = head.createDiv({ cls: "fm-multiselect-counts" });
-    counts.setText(`${this.opts.selected.size} selected`);
-    head.dataset.countsId = "counts";
+    head.createDiv({
+      cls: "fm-multiselect-counts",
+      text: `${this.opts.selected.size} selected`,
+    });
 
     this.list = this.wrapper.createDiv({ cls: "fm-multiselect-list" });
     this.renderList();
@@ -50,24 +70,6 @@ export class MultiSelectPopover {
       cls: "fm-editor-btn fm-editor-btn-primary",
     });
     closeBtn.addEventListener("click", () => this.close());
-
-    this.boundOutsideClick = (ev: MouseEvent) => {
-      const target = ev.target as Node | null;
-      if (target && !this.wrapper.contains(target)) {
-        this.close();
-      }
-    };
-    this.boundKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        this.close();
-      }
-    };
-    window.setTimeout(() => {
-      document.addEventListener("mousedown", this.boundOutsideClick);
-      document.addEventListener("keydown", this.boundKey);
-      this.input.focus();
-    }, 0);
   }
 
   private renderList(): void {
@@ -104,8 +106,7 @@ export class MultiSelectPopover {
       if (opt.meta) {
         row.createSpan({ cls: "fm-multiselect-item-meta", text: opt.meta });
       }
-      const toggle = () => {
-        const next = !this.opts.selected.has(opt.value);
+      const apply = (next: boolean): void => {
         cb.checked = next;
         if (next) this.opts.selected.add(opt.value);
         else this.opts.selected.delete(opt.value);
@@ -114,15 +115,11 @@ export class MultiSelectPopover {
       };
       cb.addEventListener("click", (ev) => {
         ev.stopPropagation();
-        const next = cb.checked;
-        if (next) this.opts.selected.add(opt.value);
-        else this.opts.selected.delete(opt.value);
-        this.opts.onToggle(opt.value, next);
-        this.updateHeadCount();
+        apply(cb.checked);
       });
       row.addEventListener("click", (ev) => {
         if ((ev.target as HTMLElement).tagName === "INPUT") return;
-        toggle();
+        apply(!this.opts.selected.has(opt.value));
       });
     }
   }
@@ -132,10 +129,14 @@ export class MultiSelectPopover {
     if (head) head.textContent = `${this.opts.selected.size} selected`;
   }
 
+  /** Re-anchor the open popover, e.g. after the table (and its "+" button) was
+   *  rebuilt underneath it while the picker stayed open. */
+  reanchorTo(anchor: HTMLElement): void {
+    this.handle?.setAnchor(anchor);
+  }
+
   close(): void {
-    document.removeEventListener("mousedown", this.boundOutsideClick);
-    document.removeEventListener("keydown", this.boundKey);
-    this.wrapper.remove();
-    this.opts.onClose?.();
+    this.handle?.close();
+    this.handle = null;
   }
 }

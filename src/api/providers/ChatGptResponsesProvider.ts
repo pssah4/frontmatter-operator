@@ -39,7 +39,7 @@ const CODEX_CLIENT_VERSION = "0.140.0";
 const CODEX_HEADERS: Record<string, string> = {
   "OpenAI-Beta": "responses=experimental",
   Originator: "codex_cli_rs",
-  "User-Agent": `codex_cli_rs/${CODEX_CLIENT_VERSION} (Obsidian Plugin) Frontmatter Editor`,
+  "User-Agent": `codex_cli_rs/${CODEX_CLIENT_VERSION} (Obsidian Plugin) Frontmatter Operator`,
   Accept: "text/event-stream",
 };
 
@@ -248,6 +248,13 @@ function openStream(
       },
     );
     req.on("error", reject);
+    // I-5 (AUDIT 2026-07-02): socket idle timeout. A hung Codex backend that
+    // sends no bytes for this long fails the request instead of waiting until
+    // the user aborts. The timer resets on each chunk; the abortSignal path
+    // below stays the independent user-cancel route.
+    req.setTimeout(120_000, () => {
+      req.destroy(new Error("Codex request timed out (no response for 120s)."));
+    });
     if (signal) {
       const onAbort = () => {
         req.destroy();

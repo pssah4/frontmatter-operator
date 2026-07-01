@@ -189,13 +189,13 @@ export class ValueMappingTable {
     for (const row of limited) this.renderRow(this.bodyEl, row);
     if (visible.length > MAX_INLINE_ROWS) {
       const tr = this.bodyEl.createEl("tr");
-      const td = tr.createEl("td", { attr: { colspan: "5" } });
+      const td = tr.createEl("td", {
+        attr: { colspan: "5" },
+        cls: "fm-editor-vm-more-row",
+      });
       td.setText(
-        `... ${visible.length - MAX_INLINE_ROWS} more rows -- narrow the filter or use bulk transforms.`,
+        `... ${visible.length - MAX_INLINE_ROWS} more rows. Narrow the filter or use bulk transforms.`,
       );
-      td.style.setProperty("color", "var(--text-muted)");
-      td.style.setProperty("font-style", "italic");
-      td.style.setProperty("text-align", "center");
     }
     this.updateMultiSelectCount();
   }

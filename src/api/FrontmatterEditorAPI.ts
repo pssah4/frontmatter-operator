@@ -11,9 +11,13 @@ import type {
   NoteRow,
   PropertyStat,
   ScanResult,
+  ValueMapping,
+  ValueTransform,
 } from "../types";
 import { applyFilters, evaluateFilter } from "../services/FilterEngine";
 import { FILTER_OPERATORS } from "../types";
+import type { CleanupReport } from "../services/RefusalTagCleanupService";
+import type { DedupReport } from "../services/WikilinkDedupCleanupService";
 
 export type NoteSelector =
   | { kind: "all" }
@@ -63,6 +67,17 @@ export interface MergePropertiesOpts {
   toProperty: string;
   onConflict?: "skip" | "overwrite" | "merge_list";
   wrapWikilink?: boolean;
+}
+
+export interface RenameValuesOpts {
+  select: NoteSelector;
+  /** The property whose values are rewritten in place. */
+  property: string;
+  /** Per-value rewrites. `from` is matched AFTER `transforms` are applied;
+   *  an empty `to` drops the value (list elements are removed). */
+  mappings?: Array<{ from: string; to: string }>;
+  /** Bulk transforms applied to each value before the mappings. */
+  transforms?: ValueTransform[];
 }
 
 let filterIdCounter = 0;
@@ -167,25 +182,78 @@ export function validateNoteSelector(input: unknown): NoteSelector {
 }
 
 /**
- * Public, stable surface of the Frontmatter Editor plugin.
+ * Public, stable surface of the Frontmatter Operator plugin.
  *
- * Exposed as `app.plugins.plugins["frontmatter-editor"].api`.
+ * Exposed as `app.plugins.plugins["frontmatter-operator"].api`.
  *
  * Every mutating method writes a JSON snapshot under
- * `<vault>/.frontmatter-editor/snapshots/{id}.json` and returns the
+ * `<vault.configDir>/plugins/frontmatter-operator/snapshots/{id}.json`
+ * (default `.obsidian/plugins/...`, kept out of vault sync) and returns the
  * snapshot id so the caller can restore via {@link FrontmatterEditorAPI.restoreSnapshot}
  * or {@link FrontmatterEditorAPI.undoLast}.
+ *
+ * Trust model (M-2, AUDIT 2026-07-01): this surface is intentionally
+ * unauthenticated -- any plugin in the vault can call it, including the
+ * destructive write methods. That is by design and adds no attack surface
+ * beyond Obsidian's own model, where any installed plugin already has full
+ * `Vault`/`TFile` write access. The defenses that DO apply on every call are:
+ * strict selector validation ({@link validateNoteSelector}), the
+ * prototype-pollution key guard (`isAllowedKey`), and a mandatory,
+ * user-restorable snapshot before each mutation. There is deliberately no
+ * cross-plugin allowlist; adding one would give a false sense of a boundary
+ * that Obsidian does not enforce at the plugin layer.
  */
 export class FrontmatterEditorAPI {
   /** Stable API contract version. Bumped on breaking changes. */
-  readonly version = "1.0.0";
+  readonly version = "1.2.0";
+
+  /**
+   * The single source of truth for the agent-callable surface. Drives two
+   * things: (1) the own-enumerable binding in the constructor below, and
+   * (2) the discovery-contract tests that mirror Vault Operator's two
+   * reflection strategies. Keep in sync with {@link ACTION_CATALOG}.
+   */
+  static readonly PUBLIC_METHODS = [
+    // read
+    "scan",
+    "listProperties",
+    "getMatchingPaths",
+    "resolveTargets",
+    "listSnapshots",
+    "describeActions",
+    // write (snapshotted, undoable)
+    "setProperty",
+    "deleteProperties",
+    "renameProperty",
+    "renameValues",
+    "copyProperty",
+    "mergeProperties",
+    "cleanupRefusalTags",
+    "dedupeWikilinks",
+    "undoLast",
+    "restoreSnapshot",
+  ] as const;
 
   constructor(
     private readonly app: App,
     private readonly scanner: FrontmatterScanner,
     private readonly bulk: BulkActionService,
     private readonly snapshots: SnapshotService,
-  ) {}
+  ) {
+    // Vault Operator discovers our API two ways: its VaultDNAScanner walks
+    // the prototype chain (sees class methods), but its probe_plugin
+    // live-probe (ADR-124) reads Object.keys (own enumerable props only).
+    // A plain class instance is invisible to the second path. Binding each
+    // public method as an own enumerable property makes both paths agree
+    // without sacrificing the class for typed solo usage.
+    for (const name of FrontmatterEditorAPI.PUBLIC_METHODS) {
+      const self = this as unknown as Record<string, unknown>;
+      const fn = self[name];
+      if (typeof fn === "function") {
+        self[name] = (fn as (...args: unknown[]) => unknown).bind(this);
+      }
+    }
+  }
 
   /** Scan the vault and return a property inventory. */
   async scan(): Promise<ScanResult> {
@@ -203,8 +271,25 @@ export class FrontmatterEditorAPI {
    * without writing anything.
    */
   async resolveTargets(select: NoteSelector): Promise<TFile[]> {
-    const rows = await this.selectorToRows(select);
+    const rows = await this._selectorToRows(select);
     return rows.map((r) => r.file);
+  }
+
+  /**
+   * Resolve a NoteSelector into the matching note paths plus a count.
+   *
+   * Agent-friendly companion to {@link resolveTargets}: returns plain
+   * strings that serialise cleanly across the Vault Operator
+   * `call_plugin_api` bridge, where the heavyweight (and partly circular)
+   * `TFile[]` from resolveTargets would be truncated. Use this to preview
+   * how many notes a rule hits before writing anything.
+   */
+  async getMatchingPaths(
+    select: NoteSelector,
+  ): Promise<{ count: number; paths: string[] }> {
+    const rows = await this._selectorToRows(select);
+    const paths = rows.map((r) => r.path);
+    return { count: paths.length, paths };
   }
 
   /**
@@ -218,7 +303,7 @@ export class FrontmatterEditorAPI {
    * form before writing.
    */
   async setProperty(opts: SetPropertyOpts): Promise<ActionResult> {
-    const rows = await this.selectorToRows(opts.select);
+    const rows = await this._selectorToRows(opts.select);
     return this.bulk.executeAction(rows, {
       type: "set",
       property: opts.property,
@@ -234,7 +319,7 @@ export class FrontmatterEditorAPI {
    * selected note.
    */
   async deleteProperties(opts: DeletePropertiesOpts): Promise<ActionResult> {
-    const rows = await this.selectorToRows(opts.select);
+    const rows = await this._selectorToRows(opts.select);
     return this.bulk.executeAction(rows, {
       type: "delete",
       properties: opts.properties,
@@ -246,7 +331,7 @@ export class FrontmatterEditorAPI {
    * value lives on under `toProperty`.
    */
   async renameProperty(opts: RenamePropertyOpts): Promise<ActionResult> {
-    const rows = await this.selectorToRows(opts.select);
+    const rows = await this._selectorToRows(opts.select);
     return this.bulk.executeAction(rows, {
       type: "rename",
       fromProperties: [opts.fromProperty],
@@ -261,7 +346,7 @@ export class FrontmatterEditorAPI {
    * are kept intact. Multi-source copies merge (list-style, deduped).
    */
   async copyProperty(opts: CopyPropertyOpts): Promise<ActionResult> {
-    const rows = await this.selectorToRows(opts.select);
+    const rows = await this._selectorToRows(opts.select);
     return this.bulk.executeAction(rows, {
       type: "copy",
       fromProperties: opts.fromProperties,
@@ -277,13 +362,81 @@ export class FrontmatterEditorAPI {
    * such as `Beschreibung + Description + descr -> description`.
    */
   async mergeProperties(opts: MergePropertiesOpts): Promise<ActionResult> {
-    const rows = await this.selectorToRows(opts.select);
+    const rows = await this._selectorToRows(opts.select);
     return this.bulk.executeAction(rows, {
       type: "move",
       fromProperties: opts.fromProperties,
       toProperty: opts.toProperty,
       onConflict: opts.onConflict ?? "merge_list",
       wrapWikilink: opts.wrapWikilink,
+    });
+  }
+
+  /**
+   * Batch-rename the VALUES of a single property in place (keys stay). For
+   * example map `Interview -> interview` across every selected note, or
+   * lowercase all values via `transforms: ["lowercase"]`. Wikilink wrapping is
+   * preserved; an empty `to` drops the value. Only notes whose value actually
+   * changes are written. Snapshotted and undoable.
+   */
+  async renameValues(opts: RenameValuesOpts): Promise<ActionResult> {
+    const rows = await this._selectorToRows(opts.select);
+    const valueMappings: ValueMapping[] = (opts.mappings ?? []).map((m) => ({
+      source: m.from,
+      target: m.to,
+      userEdited: true,
+    }));
+    return this.bulk.executeAction(rows, {
+      type: "map_values",
+      property: opts.property,
+      transforms: opts.transforms ?? [],
+      valueMappings,
+    });
+  }
+
+  /**
+   * Remove refusal text (LLM "I cannot..." boilerplate) from frontmatter
+   * across the vault and return a structured report. Unlike the
+   * `cleanup-refusal-tags` command, this never opens a confirmation dialog,
+   * so it is safe to drive from an agent. Pass `dryRun: true` to preview.
+   *
+   * The run is snapshotted, so a real run is reversible via {@link undoLast}.
+   * `scope` defaults to the curated generator-target property set; pass
+   * `"all"` to scan every non-reserved key.
+   */
+  async cleanupRefusalTags(
+    opts: { dryRun?: boolean; scope?: "targeted" | "all"; property?: string } = {},
+  ): Promise<CleanupReport> {
+    const { RefusalTagCleanupService } = await import(
+      "../services/RefusalTagCleanupService"
+    );
+    const service = new RefusalTagCleanupService(this.app, this.snapshots);
+    return service.run({
+      dryRun: opts.dryRun ?? false,
+      scope: opts.scope,
+      property: opts.property,
+    });
+  }
+
+  /**
+   * Collapse frontmatter wikilinks that resolve to the same note and
+   * shorten lone path-form links to Obsidian's canonical form. Returns a
+   * structured report. Like {@link cleanupRefusalTags}, this skips the
+   * confirmation dialog of the `dedupe-wikilinks` command and is
+   * snapshotted (reversible via {@link undoLast}). Pass `dryRun: true` to
+   * preview, or `paths` to restrict the scan to specific notes.
+   */
+  async dedupeWikilinks(
+    opts: { dryRun?: boolean; paths?: string[]; property?: string } = {},
+  ): Promise<DedupReport> {
+    const { WikilinkDedupCleanupService } = await import(
+      "../services/WikilinkDedupCleanupService"
+    );
+    const service = new WikilinkDedupCleanupService(this.app, this.snapshots);
+    return service.run({
+      dryRun: opts.dryRun ?? false,
+      paths: opts.paths,
+      property: opts.property,
     });
   }
 
@@ -324,7 +477,7 @@ export class FrontmatterEditorAPI {
     return ACTION_CATALOG;
   }
 
-  private async selectorToRows(select: NoteSelector): Promise<NoteRow[]> {
+  private async _selectorToRows(select: NoteSelector): Promise<NoteRow[]> {
     const validated = validateNoteSelector(select);
     const all = this.scanner.buildAllRows();
     if (validated.kind === "all") return all;
@@ -377,16 +530,16 @@ const SELECT_PARAMETER: ActionParameter = {
 };
 
 const ACTION_CATALOG: ActionCatalog = {
-  pluginId: "frontmatter-editor",
-  pluginName: "Frontmatter Editor",
-  version: "1.0.0",
+  pluginId: "frontmatter-operator",
+  pluginName: "Frontmatter Operator",
+  version: "1.2.0",
   description:
-    "Bulk-edit YAML frontmatter across the Obsidian vault. Filter notes by any property condition, then set, delete, rename, copy or merge properties. Every action writes a JSON snapshot and is undo-able. Safe for use from a Vault Operator skill.",
+    "Bulk-edit YAML frontmatter across the Obsidian vault. Filter notes by any property condition, then set, delete, rename, copy or merge properties; clean refusal text from tags and collapse duplicate wikilinks. Every write action saves a JSON snapshot and is undo-able. Built for use from a Vault Operator skill: call describeActions for this catalog, getMatchingPaths to preview a selector, and the write methods for parametrised edits.",
   actions: [
     {
       id: "set-property",
       name: "Set frontmatter property",
-      commandId: "frontmatter-editor:set-property",
+      commandId: "frontmatter-operator:set-property",
       apiMethod: "setProperty",
       description:
         "Write a value into a frontmatter property on the selected notes. Supports literal values, lists, wikilinks and per-note templates like `{{Thema}}`.",
@@ -433,7 +586,7 @@ const ACTION_CATALOG: ActionCatalog = {
     {
       id: "delete-properties",
       name: "Delete frontmatter properties",
-      commandId: "frontmatter-editor:delete-properties",
+      commandId: "frontmatter-operator:delete-properties",
       apiMethod: "deleteProperties",
       description:
         "Remove one or more frontmatter properties (key + value) entirely from each selected note.",
@@ -454,7 +607,7 @@ const ACTION_CATALOG: ActionCatalog = {
     {
       id: "rename-property",
       name: "Rename frontmatter property",
-      commandId: "frontmatter-editor:rename-property",
+      commandId: "frontmatter-operator:rename-property",
       apiMethod: "renameProperty",
       description:
         "Change the name of a single property without altering its value. The source key is deleted, the value lives on under the new key.",
@@ -492,9 +645,43 @@ const ACTION_CATALOG: ActionCatalog = {
       snapshotted: true,
     },
     {
+      id: "rename-values",
+      name: "Rename frontmatter values",
+      commandId: "frontmatter-operator:rename-values",
+      apiMethod: "renameValues",
+      description:
+        "Rewrite the VALUES of a single property in place (keys stay). Map specific values (e.g. `Interview` -> `interview`), and/or apply bulk transforms (trim, lowercase, titlecase, strip_diacritics). Wikilink wrapping is preserved; an empty target drops the value. Only notes whose value actually changes are written.",
+      parameters: [
+        SELECT_PARAMETER,
+        {
+          name: "property",
+          type: "string",
+          required: true,
+          description: "The property whose values are rewritten.",
+        },
+        {
+          name: "mappings",
+          type: "Array<{ from: string; to: string }>",
+          required: false,
+          description:
+            "Per-value rewrites. `from` is matched after transforms; empty `to` drops the value.",
+        },
+        {
+          name: "transforms",
+          type: '("trim" | "lowercase" | "titlecase" | "strip_diacritics")[]',
+          required: false,
+          description: "Bulk transforms applied to each value before the mappings.",
+        },
+      ],
+      example:
+        'await api.renameValues({ select: { kind: "all" }, property: "type", mappings: [{ from: "Interview", to: "interview" }] })',
+      destructive: true,
+      snapshotted: true,
+    },
+    {
       id: "copy-property",
       name: "Copy frontmatter property",
-      commandId: "frontmatter-editor:copy-property",
+      commandId: "frontmatter-operator:copy-property",
       apiMethod: "copyProperty",
       description:
         "Copy values from one or more source properties into a target property. Sources are kept; the target is populated.",
@@ -533,7 +720,7 @@ const ACTION_CATALOG: ActionCatalog = {
     {
       id: "merge-properties",
       name: "Merge frontmatter properties",
-      commandId: "frontmatter-editor:merge-properties",
+      commandId: "frontmatter-operator:merge-properties",
       apiMethod: "mergeProperties",
       description:
         "Combine values from several source properties into one target and DELETE the sources afterwards. Used for consolidating legacy keys.",
@@ -572,7 +759,7 @@ const ACTION_CATALOG: ActionCatalog = {
     {
       id: "undo-last",
       name: "Undo last frontmatter action",
-      commandId: "frontmatter-editor:undo-last",
+      commandId: "frontmatter-operator:undo-last",
       apiMethod: "undoLast",
       description:
         "Restore the most recent snapshot, reverting the last action. Returns null when no snapshots exist.",
@@ -584,7 +771,7 @@ const ACTION_CATALOG: ActionCatalog = {
     {
       id: "list-properties",
       name: "List frontmatter properties",
-      commandId: "frontmatter-editor:list-properties",
+      commandId: "frontmatter-operator:list-properties",
       apiMethod: "listProperties",
       description:
         "Return every frontmatter property in the vault with its usage count, observed types, and sample values.",
@@ -595,16 +782,147 @@ const ACTION_CATALOG: ActionCatalog = {
     },
     {
       id: "resolve-targets",
-      name: "Preview selector",
-      commandId: "frontmatter-editor:resolve-targets",
+      name: "Preview selector (TFile)",
+      commandId: "",
       apiMethod: "resolveTargets",
       description:
-        "Resolve a NoteSelector into the concrete list of TFile objects it would match. Useful for previewing a rule before applying it.",
+        "Resolve a NoteSelector into the concrete list of TFile objects it would match. Heavyweight and partly circular -- agents should prefer `getMatchingPaths`, which returns plain paths that serialise cleanly. Useful programmatically for chaining further file operations.",
       parameters: [SELECT_PARAMETER],
       example:
         'const files = await api.resolveTargets({ kind: "filter", conditions: [{ property: "Kategorie", operator: "equals", value: "Person" }] })',
       destructive: false,
       snapshotted: false,
+    },
+    {
+      id: "get-matching-paths",
+      name: "Preview selector (paths)",
+      commandId: "",
+      apiMethod: "getMatchingPaths",
+      description:
+        "Resolve a NoteSelector into the matching note paths plus a count. Agent-preferred preview: returns plain strings, not TFile objects, so the result survives the call_plugin_api bridge intact.",
+      parameters: [SELECT_PARAMETER],
+      example:
+        'const { count, paths } = await api.getMatchingPaths({ kind: "filter", conditions: [{ property: "Kategorie", operator: "equals", value: "Person" }] })',
+      destructive: false,
+      snapshotted: false,
+    },
+    {
+      id: "scan",
+      name: "Scan vault frontmatter",
+      commandId: "",
+      apiMethod: "scan",
+      description:
+        "Scan every markdown note and return the full property inventory: total notes, notes with frontmatter, and per-property stats (usage count, observed types, sample values).",
+      parameters: [],
+      example: "const inventory = await api.scan()",
+      destructive: false,
+      snapshotted: false,
+    },
+    {
+      id: "list-snapshots",
+      name: "List snapshots",
+      commandId: "",
+      apiMethod: "listSnapshots",
+      description:
+        "List the saved undo snapshots, newest first, each with its id, creation timestamp, and number of affected notes. Pass an id to `restoreSnapshot` to revert to that point.",
+      parameters: [],
+      example: "const snaps = await api.listSnapshots()",
+      destructive: false,
+      snapshotted: false,
+    },
+    {
+      id: "restore-snapshot",
+      name: "Restore snapshot",
+      commandId: "",
+      apiMethod: "restoreSnapshot",
+      description:
+        "Restore a specific snapshot by id, reverting the notes it covers to their pre-action state. Returns null when the id is unknown.",
+      parameters: [
+        {
+          name: "id",
+          type: "string",
+          required: true,
+          description: "Snapshot id, as returned by `listSnapshots`.",
+        },
+      ],
+      example: 'await api.restoreSnapshot("20260629-180000-ab12")',
+      destructive: true,
+      snapshotted: false,
+    },
+    {
+      id: "describe-actions",
+      name: "Describe actions",
+      commandId: "",
+      apiMethod: "describeActions",
+      description:
+        "Return this catalog: every action with its API method, parameters, an example, and whether it is destructive or snapshotted. The canonical self-description for agents -- call it first to learn the surface.",
+      parameters: [],
+      example: "const catalog = api.describeActions()",
+      destructive: false,
+      snapshotted: false,
+    },
+    {
+      id: "cleanup-refusal-tags",
+      name: "Clean refusal text from frontmatter",
+      commandId: "frontmatter-operator:cleanup-refusal-tags",
+      apiMethod: "cleanupRefusalTags",
+      description:
+        "Remove LLM refusal boilerplate (\"I cannot...\" and similar) from frontmatter values across the vault and return a structured report. Unlike the command, the API call never opens a confirmation dialog. Snapshotted, so reversible via `undoLast`.",
+      parameters: [
+        {
+          name: "dryRun",
+          type: "boolean",
+          required: false,
+          description: "Preview only -- report what would change without writing. Defaults to false.",
+        },
+        {
+          name: "scope",
+          type: '"targeted" | "all"',
+          required: false,
+          description:
+            "`targeted` (default) scans the curated generator-target keys (tags, keywords, aliases, topics, concepts, moc, description, summary); `all` scans every non-reserved key.",
+        },
+        {
+          name: "property",
+          type: "string",
+          required: false,
+          description: "Restrict the scan to a single property. Overrides scope.",
+        },
+      ],
+      example: "const report = await api.cleanupRefusalTags({ dryRun: true })",
+      destructive: true,
+      snapshotted: true,
+    },
+    {
+      id: "dedupe-wikilinks",
+      name: "Deduplicate wikilinks",
+      commandId: "frontmatter-operator:dedupe-wikilinks",
+      apiMethod: "dedupeWikilinks",
+      description:
+        "Collapse frontmatter wikilinks that resolve to the same note and shorten lone path-form links to Obsidian's canonical form. Returns a structured report. Skips the command's confirmation dialog; snapshotted, so reversible via `undoLast`.",
+      parameters: [
+        {
+          name: "dryRun",
+          type: "boolean",
+          required: false,
+          description: "Preview only -- report what would change without writing. Defaults to false.",
+        },
+        {
+          name: "paths",
+          type: "string[]",
+          required: false,
+          description: "Restrict the scan to these note paths. Omit to scan the whole vault.",
+        },
+        {
+          name: "property",
+          type: "string",
+          required: false,
+          description: "Restrict the scan to a single frontmatter property.",
+        },
+      ],
+      example: 'const report = await api.dedupeWikilinks({ dryRun: true })',
+      destructive: true,
+      snapshotted: true,
     },
   ],
 };

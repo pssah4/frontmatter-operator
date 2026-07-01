@@ -27,6 +27,8 @@
 
 import { setIcon } from "obsidian";
 import type { FmValue } from "../../types";
+import { ListCellEditController, type ListCommit } from "./ListCellEditController";
+import type { EditKind } from "../../services/propertyEditKind";
 
 const WIKILINK_RE = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/;
 
@@ -42,6 +44,11 @@ export interface EditableCellHandlers {
    *  (__folder, __filename, __extension) which resolve dynamically
    *  from the path and shouldn't be writeable in v1. */
   readOnly?: boolean;
+  /** Per-property editor preference, independent of this cell's current
+   *  value. Ensures a list-typed property (e.g. `type`) always edits as a
+   *  chip list even when this particular cell is empty or holds a bare
+   *  string, so a newly entered value is saved in the correct format. */
+  valueKind?: EditKind;
 }
 
 /**
@@ -159,6 +166,18 @@ function renderDisplayMode(
 
 // ----------------------------------------------------------- EDIT MODE
 
+/** Coerce any current value into the chip list's string[] form. */
+function toStringArray(current: FmValue | undefined): string[] {
+  if (current == null) return [];
+  if (Array.isArray(current)) {
+    return current
+      .filter((v) => v != null)
+      .map((v) => (typeof v === "string" ? v : String(v)));
+  }
+  const s = typeof current === "string" ? current : String(current);
+  return s.trim() === "" ? [] : [s];
+}
+
 function enterEditMode(
   td: HTMLElement,
   current: FmValue | undefined,
@@ -169,10 +188,18 @@ function enterEditMode(
   td.empty();
   const wrap = td.createDiv({ cls: "fm-editor-cell-edit" });
 
-  // Pick an editor based on the current value's type. Missing/null
-  // default to a string input -- it's the most common new-value type
-  // and the user can type "true"/"false" or "1"/"2" to coerce later
-  // via a separate Set action.
+  const kind = handlers.valueKind;
+
+  // A list-typed property always edits as a chip list, coercing an empty or
+  // scalar current value into list form. This is the fix for "new value
+  // sometimes saved as text": the editor no longer depends on whether THIS
+  // cell already happens to be an array.
+  if (kind === "list") {
+    bindListEditor(wrap, td, toStringArray(current), handlers);
+    return;
+  }
+
+  // Otherwise pick an editor from the concrete current value's type.
   if (typeof current === "boolean") {
     bindBooleanEditor(wrap, td, current, handlers);
     return;
@@ -182,19 +209,19 @@ function enterEditMode(
     return;
   }
   if (Array.isArray(current)) {
-    bindListEditor(
-      wrap,
-      td,
-      current.map((v) => (typeof v === "string" ? v : String(v))),
-      handlers,
-    );
+    bindListEditor(wrap, td, toStringArray(current), handlers);
     return;
   }
   if (current && typeof current === "object") {
     bindObjectEditor(wrap, td, current as Record<string, unknown>, handlers);
     return;
   }
-  // string / null / undefined
+
+  // string / null / undefined. Scalar kinds (number/boolean/text) defer to
+  // value-based selection here: the string editor lets the user type the
+  // value, which a later Set action can coerce. Only the list kind needs the
+  // override above, because list-vs-scalar is not recoverable from a typed
+  // string the way "5" -> number is.
   bindStringEditor(wrap, td, current == null ? "" : String(current), handlers);
 }
 
@@ -361,78 +388,96 @@ function bindListEditor(
   initial: string[],
   handlers: EditableCellHandlers,
 ): void {
-  let items = [...initial];
-  const chips = wrap.createDiv({ cls: "fm-editor-cell-list-edit" });
+  // The controller owns both the chips and the in-progress buffer. The input
+  // below is created ONCE and never recreated on a chip add -- that is the
+  // fix for the "added entry written twice" bug: the old code rebuilt the
+  // input inside renderChips, and removing the focused input fired a stale
+  // blur that re-pushed the staged value and committed prematurely.
+  const controller = new ListCellEditController(initial);
+  const container = wrap.createDiv({ cls: "fm-editor-cell-list-edit" });
+  const input = container.createEl("input", {
+    type: "text",
+    cls: "fm-editor-cell-input fm-editor-cell-input-chips",
+  });
 
-  const renderChips = () => {
-    chips.empty();
-    items.forEach((item, idx) => {
-      const pill = chips.createSpan({
+  const apply = (res: ListCommit | null): void => {
+    if (!res) return;
+    void commit(td, res.value, handlers);
+  };
+
+  // Re-render only the chips, inserted before the persistent input so the
+  // input keeps focus and no spurious blur fires.
+  const renderPills = (): void => {
+    container
+      .querySelectorAll(".fm-editor-pill-edit")
+      .forEach((el) => el.remove());
+    controller.itemsView.forEach((item, idx) => {
+      const pill = container.createSpan({
         cls: "fm-editor-pill fm-editor-pill-edit",
       });
+      container.insertBefore(pill, input);
       pill.createSpan({ text: item });
       const x = pill.createEl("button", { cls: "fm-editor-chip-remove" });
       setIcon(x, "x");
       x.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        items.splice(idx, 1);
-        renderChips();
+        controller.removeAt(idx);
+        renderPills();
+        input.focus();
       });
     });
-    const input = chips.createEl("input", {
-      type: "text",
-      cls: "fm-editor-cell-input fm-editor-cell-input-chips",
-      attr: { placeholder: items.length === 0 ? "add value..." : "+ add..." },
-    });
-    input.focus();
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        const v = input.value.trim();
-        if (v) {
-          items.push(v);
-          renderChips();
-        } else {
-          // Empty Enter on chip list -> commit the list.
-          void commit(td, items.length === 0 ? undefined : items, handlers);
-        }
-      } else if (ev.key === "Backspace" && input.value === "" && items.length > 0) {
-        ev.preventDefault();
-        items.pop();
-        renderChips();
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        exitEditMode(td, initial, handlers);
-      } else if (ev.key === "Tab") {
-        // Tab commits with whatever is staged plus any half-typed
-        // value in the input.
-        const v = input.value.trim();
-        if (v) items.push(v);
-        void commit(td, items.length === 0 ? undefined : items, handlers);
-      }
-    });
-    input.addEventListener("blur", () => {
-      // Defer so a click on a remove-chip button isn't lost.
-      setTimeout(() => {
-        if (!td.hasClass("is-editing")) return;
-        const v = input.value.trim();
-        if (v) items.push(v);
-        // Only commit on blur if the list actually changed; otherwise
-        // just exit edit mode silently.
-        if (
-          items.length !== initial.length ||
-          items.some((it, i) => it !== initial[i])
-        ) {
-          void commit(td, items.length === 0 ? undefined : items, handlers);
-        } else {
-          exitEditMode(td, initial, handlers);
-        }
-      }, 50);
-    });
+    input.placeholder =
+      controller.itemsView.length === 0 ? "add value..." : "+ add...";
   };
 
-  renderChips();
+  input.addEventListener("input", () => controller.setBuffer(input.value));
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      if (input.value.trim()) {
+        // Add a chip and stay in edit mode for the next value.
+        controller.addBuffered();
+        input.value = "";
+        renderPills();
+        input.focus();
+      } else {
+        // Empty Enter commits the whole list.
+        apply(controller.commit());
+      }
+    } else if (ev.key === "Backspace" && input.value === "") {
+      if (controller.removeLast()) {
+        ev.preventDefault();
+        renderPills();
+      }
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      controller.cancel();
+      exitEditMode(td, initial, handlers);
+    } else if (ev.key === "Tab") {
+      // Commit with the staged chips plus any half-typed value.
+      controller.addBuffered();
+      input.value = "";
+      apply(controller.commit());
+    }
+  });
+  input.addEventListener("blur", () => {
+    // Defer so a click on a chip's remove button isn't lost. The controller's
+    // finished latch makes this a no-op once an Enter/Tab commit already ran.
+    window.setTimeout(() => {
+      if (controller.isFinished) return;
+      if (!td.hasClass("is-editing")) return;
+      const res = controller.commitIfChanged();
+      if (res === "unchanged") {
+        exitEditMode(td, initial, handlers);
+      } else {
+        apply(res);
+      }
+    }, 50);
+  });
+
+  renderPills();
+  input.focus();
 }
 
 function bindObjectEditor(

@@ -28,6 +28,22 @@ function stripCodeFences(input: string): string {
   return (m ? m[1] : input).trim();
 }
 
+/**
+ * I-1 / L-5 (AUDIT 2026-07-02): fail-closed on LLM output. Strip residual
+ * control characters (newlines, tabs, NUL, DEL) before any parsed value
+ * reaches the frontmatter writer, instead of relying on the YAML layer to
+ * escape them. Shared by all three parsers so every generator target gets
+ * the same scrub.
+ */
+function stripControlChars(input: string): string {
+  return Array.from(input)
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return c >= 32 && c !== 127;
+    })
+    .join("");
+}
+
 /** "Just one sentence" — collapse whitespace, drop quotes, cap at 25 words. */
 export const parseSingleLineText: GeneratorParser = (raw) => {
   const trimmed = stripCodeFences(raw).trim();
@@ -35,7 +51,8 @@ export const parseSingleLineText: GeneratorParser = (raw) => {
   const firstLine = trimmed.split(/\r?\n/)[0]?.trim() ?? "";
   if (!firstLine) return { ok: false, error: "empty first line" };
   const unquoted = firstLine.replace(/^["'`](.*)["'`]$/s, "$1").trim();
-  const collapsed = unquoted.replace(/\s+/g, " ");
+  const collapsed = stripControlChars(unquoted.replace(/\s+/g, " ")).trim();
+  if (!collapsed) return { ok: false, error: "empty after scrub" };
   return { ok: true, value: collapsed };
 };
 
@@ -69,10 +86,12 @@ export const parseStringList: GeneratorParser = (raw) => {
   const dedup: string[] = [];
   const seen = new Set<string>();
   for (const item of items) {
-    const key = item.toLowerCase();
+    const clean = stripControlChars(item).trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    dedup.push(item);
+    dedup.push(clean);
   }
   if (dedup.length === 0) return { ok: false, error: "no list items" };
   return { ok: true, value: dedup as FmValue };
@@ -102,7 +121,10 @@ export function parseMocPayload(
     }
     const item = line.match(/^[-*]\s+(.+?)\s*$/);
     if (item && mode) {
-      const value = item[1].replace(/^["'`](.*)["'`]$/, "$1");
+      const value = stripControlChars(
+        item[1].replace(/^["'`](.*)["'`]$/, "$1"),
+      ).trim();
+      if (!value) continue;
       if (mode === "topics") topics.push(value);
       else concepts.push(value);
     }

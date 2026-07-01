@@ -3,6 +3,7 @@ import type FrontmatterEditorPlugin from "../main";
 import type { ProviderConfig, ProviderType } from "../types/llm";
 import { DEFAULT_BASE_URLS, MODEL_SUGGESTIONS } from "../types/llm";
 import { signSigV4 } from "../auth/AwsSigV4";
+import { assertSafeProviderUrl } from "./providerUrlGuard";
 
 export interface FetchedModel {
   id: string;
@@ -78,13 +79,15 @@ async function fetchOpenAICompatible(
     provider === "azure"
       ? `${baseUrl}/openai/models?api-version=${draft.apiVersion ?? "2024-10-21"}`
       : `${baseUrl}/models`;
+  // L-2 (AUDIT v0.2.0): guard the discovery URL before the key is sent.
+  assertSafeProviderUrl(url, provider);
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (draft.apiKey) headers["Authorization"] = `Bearer ${draft.apiKey}`;
   if (provider === "openrouter") {
     headers["HTTP-Referer"] =
-      "https://github.com/pssah4/frontmatter-editor";
-    headers["X-Title"] = "Frontmatter Editor";
+      "https://github.com/pssah4/frontmatter-operator";
+    headers["X-Title"] = "Frontmatter Operator";
   }
 
   const resp = await requestUrl({ url, method: "GET", headers, throw: false });
@@ -149,6 +152,7 @@ async function fetchOllama(draft: ProviderConfig): Promise<FetchResult> {
     "",
   );
   const url = `${baseUrl}/api/tags`;
+  assertSafeProviderUrl(url, "ollama");
   const resp = await requestUrl({ url, method: "GET", throw: false });
   if (resp.status >= 300) {
     return {
@@ -178,6 +182,7 @@ async function fetchGemini(draft: ProviderConfig): Promise<FetchResult> {
   // M-2 (AUDIT 2026-06-29): API key in x-goog-api-key header instead
   // of ?key= query string (which would leak via access logs).
   const url = `${base}/models?pageSize=200`;
+  assertSafeProviderUrl(url, "gemini");
   const resp = await requestUrl({
     url,
     method: "GET",
@@ -228,6 +233,7 @@ async function fetchAnthropic(draft: ProviderConfig): Promise<FetchResult> {
     "",
   );
   const url = `${base}/v1/models`;
+  assertSafeProviderUrl(url, "anthropic");
   const resp = await requestUrl({
     url,
     method: "GET",
@@ -278,7 +284,7 @@ async function fetchGitHubCopilot(
   // 1:1. Three prior mistakes broke this:
   //  - Wrong host: api.individual.githubcopilot.com (404) -- the live
   //    Copilot API for /models is api.githubcopilot.com.
-  //  - Editor-Plugin-Version: "frontmatter-editor/0.1" -- the backend
+  //  - Editor-Plugin-Version: "frontmatter-operator/0.1" -- the backend
   //    gates the response on this; impersonating copilot-chat is
   //    required, same pattern as the Codex User-Agent gate.
   //  - Missing 3 of 6 impersonation headers (User-Agent,
@@ -465,19 +471,20 @@ async function fetchBedrock(draft: ProviderConfig): Promise<FetchResult> {
   // Run both list calls in parallel via the SDK.
   const [profilesResult, foundationResult] = await Promise.all([
     listInferenceProfiles(
-      client,
-      ListInferenceProfilesCommand,
+      client as unknown as BedrockControlClient,
+      ListInferenceProfilesCommand as unknown as BedrockCommandCtor,
     ).catch((err: Error) => ({
       ok: false as const,
-      error: err.message,
+      // I-2 (AUDIT 2026-07-02): scrub credential material before surfacing.
+      error: scrubAwsError(err.message),
       list: [] as FetchedModel[],
     })),
     listFoundationModels(
-      client,
-      ListFoundationModelsCommand,
+      client as unknown as BedrockControlClient,
+      ListFoundationModelsCommand as unknown as BedrockCommandCtor,
     ).catch((err: Error) => ({
       ok: false as const,
-      error: err.message,
+      error: scrubAwsError(err.message),
       list: [] as FetchedModel[],
     })),
   ]);
@@ -498,27 +505,34 @@ async function fetchBedrock(draft: ProviderConfig): Promise<FetchResult> {
       error: errs.join(" · ") || "no models returned",
     };
   }
+  return { ok: true, models: finalizeBedrockModels(merged) };
+}
+
+/**
+ * Dedup by id and order the merged Bedrock discovery result for the
+ * picker. Returns EVERY Converse-compatible model AWS reported for the
+ * region -- the list* callers above already drop image/video/speech,
+ * provisioned-only, legacy and non-Converse families server- and
+ * client-side, so what arrives here is the full callable lineup.
+ *
+ * Deliberately NOT gated on MODEL_SUGGESTIONS.bedrock. An earlier
+ * `curated` filter kept only ids whose family literally appeared in that
+ * static suggestion list, which collapsed the ~45 models AWS returns to
+ * ~5 in a single region and hid available models (Mistral, Llama, older
+ * Claude/Nova ids) that Vault Operator shows for the same credentials.
+ * The curated set still shapes ORDER via byBedrockPriority
+ * (bedrockSuggestionPriority pulls known-good families to the top) so
+ * the auto-selected sorted[0] stays a model we've verified callable --
+ * it just no longer decides membership.
+ */
+export function finalizeBedrockModels(merged: FetchedModel[]): FetchedModel[] {
   const seen = new Set<string>();
   const unique = merged.filter((m) => {
     if (seen.has(m.id)) return false;
     seen.add(m.id);
     return true;
   });
-  // Strict gate: only return models whose family is in VO's curated
-  // MODEL_SUGGESTIONS.bedrock set. AWS's ListFoundationModels returns
-  // ~50 models per region INCLUDING ids the account has no access to
-  // (every model AWS exposes, regardless of subscription). The Default-
-  // Model picker should only show ids that are likely callable. The
-  // curated set is exactly the production-tested lineup VO ships --
-  // every entry has been verified Converse-compatible and broadly
-  // available across enabled accounts. Fallback: if filtering empties
-  // the list (extremely unusual region with no curated overlap), keep
-  // the raw list rather than ship an empty picker.
-  const curated = unique.filter((m) =>
-    SUGGESTED_BEDROCK_FAMILIES.has(bedrockFamilyKey(m.id)),
-  );
-  const final = curated.length > 0 ? curated : unique;
-  return { ok: true, models: final.sort(byBedrockPriority) };
+  return unique.sort(byBedrockPriority);
 }
 
 /**
@@ -599,10 +613,20 @@ function bedrockSuggestionPriority(id: string): number {
   return SUGGESTED_BEDROCK_FAMILIES.has(bedrockFamilyKey(id)) ? 0 : 1;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime SDK types are deep generics; we treat them as a thin send-handle here
+/**
+ * Minimal shape of the Bedrock control-plane client and the command
+ * constructors we call. Avoids `any` (the Community-Plugin review bot
+ * forbids disabling no-explicit-any); the deep AWS SDK generics are cast
+ * through `unknown` at the single call site in fetchBedrock.
+ */
+interface BedrockControlClient {
+  send(command: unknown): Promise<unknown>;
+}
+type BedrockCommandCtor = new (input: Record<string, unknown>) => unknown;
+
 async function listInferenceProfiles(
-  client: any,
-  ListInferenceProfilesCommand: any,
+  client: BedrockControlClient,
+  ListInferenceProfilesCommand: BedrockCommandCtor,
 ): Promise<{ ok: true; list: FetchedModel[] } | { ok: false; error: string; list: FetchedModel[] }> {
   const list: FetchedModel[] = [];
   let nextToken: string | undefined;
@@ -677,10 +701,9 @@ export function isConverseCompatibleId(modelId: string): boolean {
   return true;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime SDK types are deep generics
 async function listFoundationModels(
-  client: any,
-  ListFoundationModelsCommand: any,
+  client: BedrockControlClient,
+  ListFoundationModelsCommand: BedrockCommandCtor,
 ): Promise<{ ok: true; list: FetchedModel[] } | { ok: false; error: string; list: FetchedModel[] }> {
   // Server-side gate 1: byOutputModality=TEXT drops image-gen / video-gen
   // / speech models AWS-side, so the response doesn't even ship them. VO

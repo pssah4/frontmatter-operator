@@ -2,6 +2,7 @@ import { App, setIcon, Setting } from "obsidian";
 import type FrontmatterEditorPlugin from "../../main";
 import type { BulkAction, NoteRow, PropertyStat } from "../../types";
 import { BaseActionModal } from "./BaseActionModal";
+import { renderCallout } from "../callout";
 
 export class DeleteActionModal extends BaseActionModal {
   private properties: string[];
@@ -24,10 +25,10 @@ export class DeleteActionModal extends BaseActionModal {
   }
 
   protected buildForm(container: HTMLElement): void {
-    container.createDiv({
-      cls: "fm-editor-modal-hint",
-      text: "Removes the listed properties (key + value) completely from every matched note. A snapshot is written first, so you can undo from the toolbar.",
-    });
+    renderCallout(
+      container,
+      "Removes the listed properties (key + value) completely from every matched note. A snapshot is written first, so you can undo from the toolbar.",
+    );
 
     this.buildPropertyPicker(container);
   }
@@ -90,7 +91,7 @@ export class DeleteActionModal extends BaseActionModal {
     if (this.properties.length === 0) {
       host.createSpan({
         cls: "fm-editor-empty-hint",
-        text: "No properties yet — add at least one",
+        text: "No properties yet, add at least one",
       });
       return;
     }

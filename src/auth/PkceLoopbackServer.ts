@@ -8,11 +8,21 @@
 
 import { Notice } from "obsidian";
 
+export interface LoopbackCallback {
+  code: string;
+  /** Raw `state` query param echoed back by the auth server ("" if absent). */
+  state: string;
+}
+
 interface ServerHandle {
   port: number;
   close: () => void;
-  /** Resolves with the authorization code once the browser hits /callback. */
-  waitForCode: () => Promise<string>;
+  /**
+   * Resolves with the authorization code AND the echoed `state` once the
+   * browser hits /callback. The caller MUST compare `state` to the value it
+   * generated (CSRF / authorization-code-injection defence, RFC 6749 §10.12).
+   */
+  waitForCode: () => Promise<LoopbackCallback>;
 }
 
 interface HttpServerModule {
@@ -36,6 +46,14 @@ function nodeRequire<T = unknown>(id: string): T {
   return (window as unknown as { require: (id: string) => T }).require(id);
 }
 
+/**
+ * I-4 (AUDIT 2026-07-02): close an abandoned loopback server after this
+ * long. Without it, a user who starts the OAuth flow and never completes the
+ * browser step leaves 127.0.0.1:<port> bound until the next callback or a
+ * plugin unload.
+ */
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+
 export async function startLoopbackServer(
   preferredPort = 0,
 ): Promise<ServerHandle> {
@@ -48,11 +66,24 @@ export async function startLoopbackServer(
     );
   }
 
-  let resolveCode: ((code: string) => void) | null = null;
+  let resolveCode: ((result: LoopbackCallback) => void) | null = null;
   let rejectCode: ((err: Error) => void) | null = null;
-  const codePromise = new Promise<string>((resolve, reject) => {
-    resolveCode = resolve;
-    rejectCode = reject;
+  let idleTimer: number | null = null;
+  const clearIdle = () => {
+    if (idleTimer !== null) {
+      window.clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
+  const codePromise = new Promise<LoopbackCallback>((resolve, reject) => {
+    resolveCode = (result) => {
+      clearIdle();
+      resolve(result);
+    };
+    rejectCode = (err) => {
+      clearIdle();
+      reject(err);
+    };
   });
 
   const server = http.createServer((req, res) => {
@@ -77,7 +108,7 @@ export async function startLoopbackServer(
       res.end(
         `<h1>Authorized</h1><p>You can close this tab and return to Obsidian.</p>`,
       );
-      resolveCode?.(code);
+      resolveCode?.({ code, state: params.state ?? "" });
       return;
     }
     res.writeHead(404);
@@ -95,13 +126,27 @@ export async function startLoopbackServer(
   }
   const port = addr.port;
 
+  // Arm the idle timeout. Cleared on the first callback (resolve/reject) or on
+  // an explicit close(); fires only when the flow is abandoned.
+  idleTimer = window.setTimeout(() => {
+    rejectCode?.(
+      new Error("OAuth loopback timed out (no callback within 5 minutes)."),
+    );
+    try {
+      server.close();
+    } catch {
+      /* already closing */
+    }
+  }, IDLE_TIMEOUT_MS);
+
   return {
     port,
     close: () => {
+      clearIdle();
       try {
         server.close();
       } catch (e) {
-        console.warn("frontmatter-editor: loopback close failed", e);
+        console.warn("frontmatter-operator: loopback close failed", e);
       }
     },
     waitForCode: () => codePromise,

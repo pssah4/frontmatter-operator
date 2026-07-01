@@ -7,6 +7,7 @@ import type {
 } from "../../types/llm";
 import { ProviderError, recommendedMaxTokens } from "../../types/llm";
 import type { ApiHandler } from "../types";
+import { assertSafeProviderUrl } from "../providerUrlGuard";
 
 const DEFAULT_HOST = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -29,6 +30,8 @@ export class GeminiProvider implements ApiHandler {
     // instead of the query string. Google's v1beta accepts both;
     // the query-string form leaks via proxy/server access logs.
     const url = `${host}/models/${this.model.modelId}:generateContent`;
+    // L-2 (AUDIT v0.2.0): guard the destination before the key is sent.
+    assertSafeProviderUrl(url, "gemini");
 
     const contents = req.messages.map((m) => ({
       role: m.role === "assistant" ? "model" : "user",

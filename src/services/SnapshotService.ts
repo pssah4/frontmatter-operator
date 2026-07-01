@@ -6,7 +6,7 @@ import { BULK_ACTION_TYPES } from "../types";
 // (".frontmatter-editor/snapshots") so every snapshot got mirrored to
 // iCloud/Dropbox/Git/Syncthing along with the rest of the vault --
 // each snapshot contains pre-mutation frontmatter the user wanted
-// removed. Moving under vault.configDir/plugins/frontmatter-editor/
+// removed. Moving under vault.configDir/plugins/frontmatter-operator/
 // keeps the snapshots adjacent to data.json and inherits Obsidian's
 // own plugin-data exclusion from sync. The legacy path is migrated
 // on first call to ensureDir() so existing snapshots are preserved.
@@ -72,7 +72,7 @@ export class SnapshotService {
    * for its own state, so respects the user's vault override too.
    */
   private get snapshotDir(): string {
-    return `${this.vault.configDir}/plugins/frontmatter-editor/snapshots`;
+    return `${this.vault.configDir}/plugins/frontmatter-operator/snapshots`;
   }
 
   async ensureDir(): Promise<void> {
@@ -88,9 +88,35 @@ export class SnapshotService {
   }
 
   private async migrateLegacySnapshots(): Promise<void> {
-    if (!(await this.adapter.exists(LEGACY_SNAPSHOT_DIR))) return;
+    // Two historical locations are migrated into the current plugin-private
+    // dir on first ensureDir():
+    //   1. ".frontmatter-editor/snapshots" -- the pre-M-7 vault-relative dir.
+    //   2. "<configDir>/plugins/frontmatter-editor/snapshots" -- the pre-
+    //      rebrand plugin folder (the plugin id was "frontmatter-editor"
+    //      before it became "frontmatter-operator"). After the rebrand the
+    //      plugin installs under a new folder, orphaning these snapshots.
+    // Idempotent: missing sources are skipped, and a source that resolves to
+    // the current snapshotDir is skipped.
+    await this.migrateFrom(LEGACY_SNAPSHOT_DIR, true);
+    await this.migrateFrom(
+      `${this.vault.configDir}/plugins/frontmatter-editor/snapshots`,
+      false,
+    );
+  }
+
+  /**
+   * Move every *.json snapshot from `src` into the current snapshotDir, then
+   * remove `src` if it is left empty. When `cleanupVaultRootParent` is set,
+   * also removes the legacy ".frontmatter-editor" parent folder if empty.
+   */
+  private async migrateFrom(
+    src: string,
+    cleanupVaultRootParent: boolean,
+  ): Promise<void> {
+    if (src === this.snapshotDir) return;
+    if (!(await this.adapter.exists(src))) return;
     try {
-      const listing = await this.adapter.list(LEGACY_SNAPSHOT_DIR);
+      const listing = await this.adapter.list(src);
       for (const f of listing.files) {
         if (!f.endsWith(".json")) continue;
         const name = f.split("/").pop()!;
@@ -105,31 +131,33 @@ export class SnapshotService {
           await this.adapter.remove(f);
         } catch (err) {
           console.warn(
-            "frontmatter-editor: snapshot migration failed for",
+            "frontmatter-operator: snapshot migration failed for",
             f,
             err,
           );
         }
       }
-      const after = await this.adapter.list(LEGACY_SNAPSHOT_DIR);
+      const after = await this.adapter.list(src);
       if (after.files.length === 0 && after.folders.length === 0) {
-        await this.adapter.rmdir(LEGACY_SNAPSHOT_DIR, false);
-        // Try to delete the parent .frontmatter-editor folder too if it's
-        // now empty -- it was created solely for this snapshot dir.
-        const parent = ".frontmatter-editor";
-        if (await this.adapter.exists(parent)) {
-          const parentListing = await this.adapter.list(parent);
-          if (
-            parentListing.files.length === 0 &&
-            parentListing.folders.length === 0
-          ) {
-            await this.adapter.rmdir(parent, false);
+        await this.adapter.rmdir(src, false);
+        if (cleanupVaultRootParent) {
+          // Try to delete the parent .frontmatter-editor folder too if it's
+          // now empty -- it was created solely for this snapshot dir.
+          const parent = ".frontmatter-editor";
+          if (await this.adapter.exists(parent)) {
+            const parentListing = await this.adapter.list(parent);
+            if (
+              parentListing.files.length === 0 &&
+              parentListing.folders.length === 0
+            ) {
+              await this.adapter.rmdir(parent, false);
+            }
           }
         }
       }
     } catch (err) {
       console.warn(
-        "frontmatter-editor: snapshot migration failed (will retry)",
+        "frontmatter-operator: snapshot migration failed (will retry)",
         err,
       );
     }
@@ -173,12 +201,12 @@ export class SnapshotService {
           snaps.push(parsed);
         } else {
           console.debug(
-            "frontmatter-editor: snapshot has invalid shape, skipping",
+            "frontmatter-operator: snapshot has invalid shape, skipping",
             f,
           );
         }
       } catch (err) {
-        console.warn("frontmatter-editor: failed to read snapshot", f, err);
+        console.warn("frontmatter-operator: failed to read snapshot", f, err);
       }
     }
     return snaps.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

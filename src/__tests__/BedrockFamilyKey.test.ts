@@ -105,6 +105,20 @@ describe("enhanceBedrockError", () => {
     expect(err.message).toContain("https://eu-central-1.console.aws.amazon.com");
   });
 
+  it("I-2: scrubs AWS credential material from the surfaced message", () => {
+    const err = enhanceBedrockError(
+      makeError(
+        "UnrecognizedClientException",
+        "Bad signature Credential=AKIAIOSFODNN7EXAMPLE/20250101/eu-central-1/bedrock/aws4_request Signature=abcdef1234567890",
+      ),
+      "eu.anthropic.claude-sonnet-5",
+      "eu-central-1",
+    );
+    expect(err.message).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(err.message).not.toContain("abcdef1234567890");
+    expect(err.message).toContain("<redacted>");
+  });
+
   it("falls back to the bare AWS error wording for unknown exceptions", () => {
     const err = enhanceBedrockError(
       makeError("InternalServerError", "Service unavailable"),
