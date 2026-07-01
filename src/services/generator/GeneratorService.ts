@@ -7,8 +7,10 @@ import type {
 import { GENERATOR_GUARDRAIL } from "../../types/generators";
 import type { ProviderConfig, RunModelOptions } from "../../types/llm";
 import { buildApiHandler } from "../../api/ProviderRegistry";
+import { isAllowedKey } from "../BulkActionService";
 import type FrontmatterEditorPlugin from "../../main";
 import { parseResponse } from "./parsers";
+import { triggerBatchEvent, FM_BATCH_START, FM_BATCH_END } from "../../batchEvents";
 
 /**
  * How a generator run handles a note that already has a non-empty
@@ -84,6 +86,18 @@ export class GeneratorService {
    * are preserved by Obsidian's own YAML writer.
    */
   async run(opts: GeneratorRunOptions): Promise<GeneratorRunResult> {
+    // A generate run writes many notes, each behind a (slow) LLM call.
+    // Bracket it so the live view suspends its per-note refresh and redraws
+    // once when the whole run finishes.
+    triggerBatchEvent(this.app, FM_BATCH_START);
+    try {
+      return await this.runInner(opts);
+    } finally {
+      triggerBatchEvent(this.app, FM_BATCH_END);
+    }
+  }
+
+  private async runInner(opts: GeneratorRunOptions): Promise<GeneratorRunResult> {
     const result: GeneratorRunResult = {
       successCount: 0,
       skippedCount: 0,
@@ -327,6 +341,10 @@ export class GeneratorService {
     parserId: string,
     conflictMode: GeneratorConflictMode,
   ): Promise<void> {
+    // L-3 (AUDIT 2026-07-01): the target property comes from a user-editable /
+    // importable prompt config, so reject prototype-polluting keys here too --
+    // the bulk action write paths already do (BulkActionService.isAllowedKey).
+    if (!isAllowedKey(property)) return;
     await this.app.fileManager.processFrontMatter(file, (fm: Frontmatter) => {
       const existingRaw = fm[property];
       const targetEmpty = isEmptyExisting(existingRaw);
@@ -682,12 +700,12 @@ export async function waitForMetadataChange(
       done = true;
       // eslint-disable-next-line @typescript-eslint/no-use-before-define -- ref is captured by the listener closure below
       app.metadataCache.offref(ref);
-      clearTimeout(timer);
+      window.clearTimeout(timer);
       resolve();
     };
     const ref = app.metadataCache.on("changed", (changed) => {
       if (changed.path === file.path) finish();
     });
-    const timer = setTimeout(finish, timeoutMs);
+    const timer = window.setTimeout(finish, timeoutMs);
   });
 }

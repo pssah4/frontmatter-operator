@@ -83,9 +83,20 @@ export class ChatGptOAuthService {
       }
 
       // Race against the abort signal.
-      const code = await raceWithAbort(server.waitForCode(), controller.signal);
+      const callback = await raceWithAbort(
+        server.waitForCode(),
+        controller.signal,
+      );
+      // L-1 (AUDIT v0.2.0): validate the echoed `state` against the value we
+      // generated. Without this the CSRF token is decorative and a forged
+      // callback to the fixed loopback port could inject an auth code.
+      if (callback.state !== state) {
+        throw new Error(
+          "OAuth state mismatch -- aborting (possible CSRF / forged callback).",
+        );
+      }
       controller.setStatus("Exchanging code for tokens...");
-      const tokens = await this.exchangeCode(code, verifier);
+      const tokens = await this.exchangeCode(callback.code, verifier);
       await this.persist(tokens);
       controller.setStatus("Authorized.");
     } finally {

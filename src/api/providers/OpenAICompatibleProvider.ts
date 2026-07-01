@@ -11,9 +11,11 @@ import {
   DEFAULT_API_VERSIONS,
   ProviderError,
   isTemperatureFixed,
+  modelSupportsTemperature,
   recommendedMaxTokens,
 } from "../../types/llm";
 import type { ApiHandler } from "../types";
+import { assertSafeProviderUrl } from "../providerUrlGuard";
 
 export interface OpenAICompatibleOptions {
   /** Override the bearer token (used by GitHub Copilot / ChatGPT OAuth flows). */
@@ -60,6 +62,9 @@ export class OpenAICompatibleProvider implements ApiHandler {
       );
     }
     const url = this.opts.urlOverride ?? this.buildUrl(baseUrl);
+    // L-2 (AUDIT v0.2.0): reject cleartext/metadata destinations before the
+    // Bearer token is attached, so a bad baseUrl can never leak the credential.
+    assertSafeProviderUrl(url, this.provider.type);
 
     const messages = [
       { role: "system", content: req.systemPrompt },
@@ -83,7 +88,13 @@ export class OpenAICompatibleProvider implements ApiHandler {
       else body.max_tokens = maxTokens;
     }
 
-    if (!isTemperatureFixed(this.provider.type, this.model.modelId)) {
+    // Skip temperature when the model pins it API-side (o-series / gpt-5) or
+    // dropped the sampling parameter entirely (Claude 5 / Opus 4.7+ on
+    // OpenRouter, GPT-5). Sending it 400s on those.
+    if (
+      !isTemperatureFixed(this.provider.type, this.model.modelId) &&
+      modelSupportsTemperature(this.model.modelId)
+    ) {
       const temp = req.temperature ?? this.model.temperature ?? 0;
       body.temperature = temp;
     }
@@ -102,8 +113,8 @@ export class OpenAICompatibleProvider implements ApiHandler {
     if (this.provider.type === "openrouter") {
       headers["HTTP-Referer"] =
         headers["HTTP-Referer"] ??
-        "https://github.com/pssah4/frontmatter-editor";
-      headers["X-Title"] = headers["X-Title"] ?? "Frontmatter Editor";
+        "https://github.com/pssah4/frontmatter-operator";
+      headers["X-Title"] = headers["X-Title"] ?? "Frontmatter Operator";
     }
 
     const request: RequestUrlParam = {

@@ -320,6 +320,38 @@ export function getMaxTemperature(provider: ProviderType): number {
   return 2;
 }
 
+/**
+ * Whether a model still accepts the `temperature` sampling parameter.
+ * Some recent models removed sampling parameters (temperature, top_p, top_k)
+ * from their request surface and reject any value with a 400 -- on Bedrock the
+ * Converse API surfaces this as `ValidationException: `temperature` is
+ * deprecated for this model`. The parameter has to be omitted entirely.
+ *
+ * Ported from Vault Operator's model-registry (FIX-04-03-02) and extended for
+ * the Claude 5 generation:
+ *  - Claude 5 (sonnet-5 / opus-5 / haiku-5): sampling parameters removed.
+ *  - Claude Opus 4.7+ snapshots (4-7, 4-8, ... a future 4-10/4-11): removed.
+ *    Opus 4.6 and earlier single-digit minors still accept temperature.
+ *  - Claude Fable / Mythos families: removed.
+ *  - OpenAI GPT-5.x: default-only temperature, safer to omit.
+ *
+ * Matched un-anchored so every id form maps to the same answer: direct
+ * (claude-sonnet-5), Bedrock cross-region (eu./us./global.anthropic.claude-
+ * sonnet-5-...-v1:0) and OpenRouter (anthropic/claude-sonnet-5).
+ */
+export function modelSupportsTemperature(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  // Claude 5 generation.
+  if (/claude-(?:opus|sonnet|haiku)-5\b/.test(id)) return false;
+  // Claude Opus 4.7+ snapshots (never 4-6 or earlier single-digit minors).
+  if (/claude-opus-4-(?:[7-9]|\d\d+)\b/.test(id)) return false;
+  // Claude Fable / Mythos families.
+  if (/claude-(?:fable|mythos)\b/.test(id)) return false;
+  // OpenAI GPT-5 family.
+  if (/\bgpt-5(?:\b|[.-])/.test(id)) return false;
+  return true;
+}
+
 // ----------------------------------------------------------- chat shape
 
 export interface ChatMessage {

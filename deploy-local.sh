@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Deploy Frontmatter Editor to your local Obsidian vault.
+# Deploy Frontmatter Operator to your local Obsidian vault.
 # Usage: ./deploy-local.sh
 #
 # Requires a .env file in the project root with:
-#   PLUGIN_DIR=/path/to/your/obsidian/vault/.obsidian/plugins/frontmatter-editor
+#   PLUGIN_DIR=/path/to/your/obsidian/vault/.obsidian/plugins/frontmatter-operator
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -16,11 +16,11 @@ fi
 
 if [ -z "$PLUGIN_DIR" ]; then
   echo "Error: PLUGIN_DIR not set. Create a .env file with:"
-  echo "  PLUGIN_DIR=/path/to/.obsidian/plugins/frontmatter-editor"
+  echo "  PLUGIN_DIR=/path/to/.obsidian/plugins/frontmatter-operator"
   exit 1
 fi
 
-echo "Deploying Frontmatter Editor to: $PLUGIN_DIR"
+echo "Deploying Frontmatter Operator to: $PLUGIN_DIR"
 
 mkdir -p "$PLUGIN_DIR"
 

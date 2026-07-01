@@ -9,9 +9,11 @@ import {
   DEFAULT_BASE_URLS,
   ProviderError,
   recommendedMaxTokens,
+  modelSupportsTemperature,
 } from "../../types/llm";
 import type { ApiHandler } from "../types";
 import { assertValidHeader } from "../headerValidation";
+import { assertSafeProviderUrl } from "../providerUrlGuard";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -34,6 +36,10 @@ export class AnthropicProvider implements ApiHandler {
       this.provider.baseUrl ?? DEFAULT_BASE_URLS.anthropic!
     ).replace(/\/+$/, "");
     const url = `${baseUrl}/v1/messages`;
+    // M-1 SSRF (AUDIT 2026-07-01): the base URL is user-editable (self-hosted
+    // gateway override), so guard it before the x-api-key leaves the machine --
+    // same control the Gemini / OpenAI-compatible generate paths already apply.
+    assertSafeProviderUrl(url, "anthropic");
 
     const maxTokens =
       req.maxTokens ?? this.model.maxTokens ?? recommendedMaxTokens(this.model.modelId);
@@ -44,12 +50,16 @@ export class AnthropicProvider implements ApiHandler {
       system: req.systemPrompt,
       messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
     };
-    if (req.temperature !== undefined) {
-      body.temperature = req.temperature;
-    } else if (this.model.temperature !== undefined) {
-      body.temperature = this.model.temperature;
-    } else {
-      body.temperature = 0;
+    // Claude 5 generation, Opus 4.7+ and Fable/Mythos dropped the sampling
+    // parameters and 400 on any value ("temperature ... deprecated"); omit it.
+    if (modelSupportsTemperature(this.model.modelId)) {
+      if (req.temperature !== undefined) {
+        body.temperature = req.temperature;
+      } else if (this.model.temperature !== undefined) {
+        body.temperature = this.model.temperature;
+      } else {
+        body.temperature = 0;
+      }
     }
     if (this.model.thinkingEnabled) {
       body.thinking = {

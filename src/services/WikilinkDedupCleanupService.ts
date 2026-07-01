@@ -18,6 +18,7 @@ import { TFile, type App } from "obsidian";
 import type { SnapshotService } from "./SnapshotService";
 import type { Frontmatter } from "../types";
 import { dedupeWikilinkValue, type LinkResolver } from "./WikilinkDedup";
+import { triggerBatchEvent, FM_BATCH_START, FM_BATCH_END } from "../batchEvents";
 
 /** Frontmatter keys we never touch. */
 const RESERVED_KEYS = new Set(["position", "tags-meta"]);
@@ -55,6 +56,15 @@ export class WikilinkDedupCleanupService {
   ) {}
 
   async run(opts: DedupOptions = {}): Promise<DedupReport> {
+    triggerBatchEvent(this.app, FM_BATCH_START);
+    try {
+      return await this.runInner(opts);
+    } finally {
+      triggerBatchEvent(this.app, FM_BATCH_END);
+    }
+  }
+
+  private async runInner(opts: DedupOptions = {}): Promise<DedupReport> {
     const dryRun = opts.dryRun ?? false;
     const files = this.resolveFiles(opts.paths);
     const perNote: DedupReport["perNote"] = [];

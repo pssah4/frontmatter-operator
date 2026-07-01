@@ -4,10 +4,18 @@ import {
   GENERATOR_LANGUAGE_LABELS,
   GENERATOR_LANGUAGES,
   DEFAULT_PRESETS,
+  emptyCustomPrompt,
   type GeneratorLanguage,
+  type GeneratorParserId,
+  type GeneratorPreset,
+  type CustomPromptTemplate,
 } from "../../types/generators";
 import { PROVIDER_LABELS, type ProviderConfig } from "../../types/llm";
 import { ProviderDetailModal } from "./ProviderDetailModal";
+import { confirmModal } from "../modals/ConfirmModal";
+import { promptModal } from "../modals/PromptModal";
+import { renderCallout } from "../callout";
+import { PromptEditorModal } from "../modals/PromptEditorModal";
 
 /**
  * Per-row credentials probe. Mirrors VO providerHasCredentials
@@ -40,13 +48,22 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     containerEl.addClass("fm-editor-settings");
 
     this.renderProvidersSection();
-    this.renderGeneratorsSection();
+    this.renderPromptsSection();
     this.renderMaintenanceSection();
+  }
+
+  /** Vault-Operator-style section heading: uppercase, muted, hairline underline
+   *  -- so the panel reads as part of the same tool family. */
+  private renderSectionHeading(title: string): void {
+    this.containerEl.createDiv({
+      cls: "fm-editor-settings-section",
+      text: title,
+    });
   }
 
   private renderMaintenanceSection(): void {
     const { containerEl } = this;
-    new Setting(containerEl).setName("Maintenance").setHeading();
+    this.renderSectionHeading("Maintenance");
     new Setting(containerEl)
       .setName("Clean refusal text from tags")
       .setDesc(
@@ -72,12 +89,12 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
   private renderProvidersSection(): void {
     const { containerEl } = this;
 
-    new Setting(containerEl).setName("LLM providers").setHeading();
+    this.renderSectionHeading("LLM providers");
 
-    containerEl.createDiv({
-      cls: "fm-editor-modal-hint",
-      text: "One provider account per row. The AI chat (Generate with AI from a column header) picks the provider and concrete model at run time. 12 provider types are supported.",
-    });
+    renderCallout(
+      containerEl,
+      "One provider account per row. The AI chat (Generate with AI from a column header) picks the provider and concrete model at run time. 12 provider types are supported.",
+    );
 
     // VO-style 5-column grid: Provider | Key | Enable | Default | Actions.
     // Same DOM + CSS class set as Vault Operator's ProvidersTab so the
@@ -144,14 +161,17 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     setIcon(keyIcon, hasKey ? "check" : "minus");
     keyEl.addClass(hasKey ? "mc-key-ok" : "mc-key-missing");
 
-    // ---- Enable toggle (custom checkbox + track) ----
+    // ---- Enable toggle (slim custom switch) ----
+    // The checkbox uses appearance:none and sits invisibly over the whole
+    // switch, so the browser's native checkbox can never show through beside
+    // the track (the earlier "two overlapping toggles" bug).
     const enableEl = row.createDiv("mc-enable");
-    const toggleLabel = enableEl.createEl("label", { cls: "mc-toggle" });
-    const toggleInput = toggleLabel.createEl("input", {
+    const toggle = enableEl.createEl("label", { cls: "fm-toggle" });
+    const toggleInput = toggle.createEl("input", {
       attr: { type: "checkbox" },
     });
-    toggleLabel.createSpan({ cls: "mc-toggle-track" });
     toggleInput.checked = provider.enabled;
+    toggle.createSpan({ cls: "fm-toggle-track" });
     toggleInput.addEventListener("change", async () => {
       provider.enabled = toggleInput.checked;
       // Disabling the active provider clears the default slot so the
@@ -200,9 +220,13 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     });
     setIcon(delBtn, "trash");
     delBtn.addEventListener("click", async () => {
-      const ok = window.confirm(
-        `Remove provider "${provider.displayName || PROVIDER_LABELS[provider.type]}"?`,
-      );
+      const ok = await confirmModal(this.app, {
+        title: "Remove provider?",
+        message: `Remove provider "${provider.displayName || PROVIDER_LABELS[provider.type]}"? This clears its configuration.`,
+        confirmLabel: "Remove",
+        cancelLabel: "Cancel",
+        destructive: true,
+      });
       if (!ok) return;
       this.plugin.settings.providers = this.plugin.settings.providers.filter(
         (p) => p.id !== provider.id,
@@ -237,19 +261,27 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     return `${cached.length} models  ·  default: ${defaultLabel}`;
   }
 
-  private renderGeneratorsSection(): void {
+  /**
+   * One unified prompt list (built-in + custom look identical -- "a prompt is a
+   * prompt"). Each row opens the same editor; built-in prompts can be deleted
+   * and re-seeded via "Restore built-in prompts".
+   */
+  private renderPromptsSection(): void {
     const { containerEl } = this;
 
-    new Setting(containerEl).setName("Generators").setHeading();
+    this.renderSectionHeading("Prompts");
+
+    renderCallout(
+      containerEl,
+      "Prompts fill one frontmatter property with AI output, one note at a time. Run a prompt from a note table: open a property column's chevron menu and choose Generate with AI. A safety guardrail is always added automatically.",
+    );
 
     new Setting(containerEl)
       .setName("Prompt language")
-      .setDesc(
-        "Language used for the built-in generator prompts. Custom edits are preserved per language.",
-      )
+      .setDesc("Language for the built-in prompt text. Edits are kept per language.")
       .addDropdown((d) => {
-        for (const lang of GENERATOR_LANGUAGES) {
-          d.addOption(lang, GENERATOR_LANGUAGE_LABELS[lang]);
+        for (const l of GENERATOR_LANGUAGES) {
+          d.addOption(l, GENERATOR_LANGUAGE_LABELS[l]);
         }
         d.setValue(this.plugin.settings.generatorLanguage);
         d.onChange(async (value) => {
@@ -259,98 +291,307 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
         });
       });
 
-    for (const preset of this.plugin.settings.presets) {
-      this.renderPresetSection(containerEl, preset);
-    }
-    this.renderCustomPromptsSection();
-  }
-
-  private renderPresetSection(
-    parent: HTMLElement,
-    preset: (typeof this.plugin.settings.presets)[number],
-  ): void {
-    const head = new Setting(parent)
-      .setName(preset.displayName)
-      .setDesc(`${preset.description}  ·  writes to \`${preset.targetProperty}\``);
-    head.addButton((b) => {
-      b.setButtonText("Reset prompts to default")
-        .setWarning()
-        .onClick(async () => {
-          const fresh = DEFAULT_PRESETS.find((p) => p.id === preset.id);
-          if (!fresh) return;
-          const idx = this.plugin.settings.presets.findIndex((p) => p.id === preset.id);
-          if (idx >= 0) {
-            this.plugin.settings.presets[idx] = JSON.parse(JSON.stringify(fresh));
-            await this.plugin.saveSettings();
-            this.display();
-            new Notice(`Reset prompt for ${preset.displayName}`);
-          }
-        });
+    // Create row.
+    const createWrap = containerEl.createDiv({ cls: "fm-editor-prompt-create" });
+    const nameInput = createWrap.createEl("input", {
+      type: "text",
+      cls: "fm-editor-filter-input",
+      placeholder: 'New prompt name (e.g. "Short summary")',
+    });
+    const createBtn = createWrap.createEl("button", {
+      cls: "fm-editor-btn fm-editor-btn-primary",
+      text: "Create prompt",
+    });
+    const doCreate = (): void => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        nameInput.focus();
+        return;
+      }
+      new PromptEditorModal(this.app, {
+        title: "New prompt",
+        draft: { name, targetProperty: "", parser: "single_line_text", text: "" },
+        onSave: async (draft) => {
+          const tpl = emptyCustomPrompt(draft.targetProperty);
+          tpl.name = draft.name;
+          tpl.parser = draft.parser;
+          tpl.prompt = draft.text;
+          this.plugin.settings.customPrompts.push(tpl);
+          await this.plugin.saveSettings();
+          this.display();
+        },
+      }).open();
+    };
+    createBtn.addEventListener("click", doCreate);
+    nameInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        doCreate();
+      }
     });
 
+    const importBtn = createWrap.createEl("button", {
+      cls: "fm-editor-btn",
+      text: "Import",
+    });
+    importBtn.addEventListener("click", () => void this.importPrompt());
+
+    // Unified list.
+    const list = containerEl.createDiv({ cls: "fm-editor-prompt-list" });
+    const total =
+      this.plugin.settings.presets.length +
+      this.plugin.settings.customPrompts.length;
+    if (total === 0) {
+      list.createDiv({
+        cls: "fm-editor-prompt-empty",
+        text: "No prompts yet. Create one above.",
+      });
+    }
     const lang = this.plugin.settings.generatorLanguage;
+    for (const preset of this.plugin.settings.presets) {
+      this.renderPromptRow(list, {
+        name: preset.displayName,
+        target: preset.targetProperty,
+        description: preset.description,
+        enabled: preset.enabled !== false,
+        onEdit: () => this.editPreset(preset),
+        onExport: () =>
+          this.exportPrompt(
+            preset.displayName,
+            preset.targetProperty,
+            preset.parser,
+            preset.prompts[lang],
+          ),
+        onDelete: () => this.deletePreset(preset),
+        onToggle: async (enabled) => {
+          preset.enabled = enabled;
+          await this.plugin.saveSettings();
+        },
+      });
+    }
+    for (const tpl of this.plugin.settings.customPrompts) {
+      this.renderPromptRow(list, {
+        name: tpl.name,
+        target: tpl.targetProperty,
+        enabled: tpl.enabled !== false,
+        onEdit: () => this.editCustom(tpl),
+        onExport: () =>
+          this.exportPrompt(tpl.name, tpl.targetProperty, tpl.parser, tpl.prompt),
+        onDelete: () => this.deleteCustom(tpl),
+        onToggle: async (enabled) => {
+          tpl.enabled = enabled;
+          await this.plugin.saveSettings();
+        },
+      });
+    }
 
-    // Single prompt per property per language. The fixed safety
-    // guardrail (output-only policy + UNABLE_TO_GENERATE sentinel)
-    // is non-user-editable and prepended automatically by the
-    // GeneratorService -- see types/generators.ts GENERATOR_GUARDRAIL.
-    const promptSetting = new Setting(parent)
-      .setName("Prompt")
-      .setDesc(
-        "Instruction sent to the LLM per note. Variables: {{NOTE_BODY}}, {{NOTE_TITLE}}, {{KNOWN_TOPICS}}, {{KNOWN_CONCEPTS}}. A fixed safety guardrail (refusal sentinel, output-only policy) is appended automatically; you don't need to write it yourself.",
-      );
-    promptSetting.controlEl.style.display = "block";
-    promptSetting.controlEl.style.width = "100%";
-    const promptTa = promptSetting.controlEl.createEl("textarea", {
-      cls: "fm-editor-generator-textarea",
-      text: preset.prompts[lang],
+    // Offer to re-seed any deleted built-in prompts.
+    const missing = DEFAULT_PRESETS.filter(
+      (dp) => !this.plugin.settings.presets.some((p) => p.id === dp.id),
+    );
+    if (missing.length > 0) {
+      const restore = containerEl.createEl("button", {
+        cls: "fm-editor-btn fm-editor-prompt-restore",
+        text: `Restore ${missing.length} built-in prompt${missing.length === 1 ? "" : "s"}`,
+      });
+      restore.addEventListener("click", async () => {
+        for (const dp of missing) {
+          this.plugin.settings.presets.push(JSON.parse(JSON.stringify(dp)));
+        }
+        await this.plugin.saveSettings();
+        this.display();
+      });
+    }
+  }
+
+  private renderPromptRow(
+    list: HTMLElement,
+    item: {
+      name: string;
+      target: string;
+      description?: string;
+      enabled: boolean;
+      onEdit: () => void;
+      onExport: () => void;
+      onDelete: () => Promise<void>;
+      onToggle: (enabled: boolean) => Promise<void>;
+    },
+  ): void {
+    const row = list.createDiv({ cls: "fm-editor-prompt-row" });
+    if (!item.enabled) row.addClass("is-disabled");
+    const nameEl = row.createSpan({
+      cls: "fm-editor-prompt-name",
+      text: item.name,
     });
-    promptTa.rows = 14;
-    promptTa.addEventListener("change", async () => {
-      preset.prompts[lang] = promptTa.value;
-      await this.plugin.saveSettings();
+    if (item.description) nameEl.title = item.description;
+    if (item.target) {
+      row.createSpan({ cls: "fm-editor-prompt-target", text: item.target });
+    }
+
+    // Actions mirror Vault Operator's row: edit, export, delete, enable-toggle.
+    const actions = row.createDiv({ cls: "fm-editor-prompt-actions" });
+
+    const edit = actions.createEl("button", { cls: "fm-editor-icon-btn" });
+    setIcon(edit, "pencil");
+    edit.title = "Edit prompt";
+    edit.addEventListener("click", item.onEdit);
+
+    const exportBtn = actions.createEl("button", { cls: "fm-editor-icon-btn" });
+    setIcon(exportBtn, "download");
+    exportBtn.title = "Copy prompt as JSON";
+    exportBtn.addEventListener("click", item.onExport);
+
+    const del = actions.createEl("button", {
+      cls: "fm-editor-icon-btn mod-warning",
+    });
+    setIcon(del, "trash-2");
+    del.title = "Delete prompt";
+    del.addEventListener("click", () => void item.onDelete());
+
+    const toggle = actions.createEl("label", { cls: "fm-toggle" });
+    const cb = toggle.createEl("input", { attr: { type: "checkbox" } });
+    cb.checked = item.enabled;
+    toggle.createSpan({ cls: "fm-toggle-track" });
+    toggle.title = item.enabled ? "Enabled" : "Disabled";
+    cb.addEventListener("change", () => {
+      row.toggleClass("is-disabled", !cb.checked);
+      toggle.title = cb.checked ? "Enabled" : "Disabled";
+      void item.onToggle(cb.checked);
     });
   }
 
-  private renderCustomPromptsSection(): void {
-    const { containerEl } = this;
+  private async exportPrompt(
+    name: string,
+    targetProperty: string,
+    parser: GeneratorParserId,
+    text: string,
+  ): Promise<void> {
+    const json = JSON.stringify({ name, targetProperty, parser, prompt: text });
+    try {
+      await navigator.clipboard.writeText(json);
+      new Notice(`Copied "${name}" to clipboard as JSON.`);
+    } catch {
+      new Notice("Could not access the clipboard.");
+    }
+  }
 
-    new Setting(containerEl).setName("Custom prompts").setHeading();
-
-    containerEl.createDiv({
-      cls: "fm-editor-modal-hint",
-      text: "Saved ad-hoc prompts. Created from the Generate-with-AI modal (Save as custom prompt).",
+  private async importPrompt(): Promise<void> {
+    const json = await promptModal(this.app, {
+      title: "Import prompt",
+      message: "Paste a prompt JSON (name, targetProperty, parser, prompt).",
+      placeholder: '{"name":"...","targetProperty":"...","parser":"single_line_text","prompt":"..."}',
+      confirmLabel: "Import",
     });
-
-    if (this.plugin.settings.customPrompts.length === 0) {
-      containerEl.createDiv({
-        cls: "fm-editor-condition-empty",
-        text: "No custom prompts yet.",
-      });
-      return;
+    if (!json) return;
+    try {
+      const obj = JSON.parse(json) as Record<string, unknown>;
+      const target = String(obj.targetProperty ?? "");
+      const tpl = emptyCustomPrompt(target);
+      tpl.name = String(obj.name ?? "Imported prompt");
+      tpl.targetProperty = target;
+      const parser = String(obj.parser ?? "");
+      tpl.parser = (
+        ["single_line_text", "list_string", "moc_topics_concepts"].includes(parser)
+          ? parser
+          : "single_line_text"
+      ) as GeneratorParserId;
+      tpl.prompt = String(obj.prompt ?? "");
+      this.plugin.settings.customPrompts.push(tpl);
+      await this.plugin.saveSettings();
+      this.display();
+      new Notice(`Imported "${tpl.name}".`);
+    } catch {
+      new Notice("Invalid prompt JSON.");
     }
+  }
 
-    for (const tpl of this.plugin.settings.customPrompts) {
-      const row = new Setting(containerEl)
-        .setName(tpl.name)
-        .setDesc(`target: \`${tpl.targetProperty}\`  ·  parser: ${tpl.parser}`);
-      row.addButton((b) => {
-        b.setButtonText("Rename").onClick(async () => {
-          const next = window.prompt("Rename custom prompt", tpl.name);
-          if (!next) return;
-          tpl.name = next;
-          await this.plugin.saveSettings();
-          this.display();
-        });
-      });
-      row.addButton((b) => {
-        b.setIcon("trash-2").setWarning().onClick(async () => {
-          this.plugin.settings.customPrompts =
-            this.plugin.settings.customPrompts.filter((p) => p.id !== tpl.id);
-          await this.plugin.saveSettings();
-          this.display();
-        });
-      });
-    }
+  private editPreset(preset: GeneratorPreset): void {
+    const lang = this.plugin.settings.generatorLanguage;
+    new PromptEditorModal(this.app, {
+      title: "Edit prompt",
+      languageNote: `${GENERATOR_LANGUAGE_LABELS[lang]} text`,
+      draft: {
+        name: preset.displayName,
+        targetProperty: preset.targetProperty,
+        parser: preset.parser,
+        text: preset.prompts[lang],
+      },
+      onReset: preset.isBuiltIn
+        ? async () => {
+            const fresh = DEFAULT_PRESETS.find((p) => p.id === preset.id);
+            if (!fresh) return;
+            const idx = this.plugin.settings.presets.findIndex(
+              (p) => p.id === preset.id,
+            );
+            if (idx >= 0) {
+              this.plugin.settings.presets[idx] = JSON.parse(
+                JSON.stringify(fresh),
+              );
+              await this.plugin.saveSettings();
+              this.display();
+              new Notice(`Reset "${fresh.displayName}"`);
+            }
+          }
+        : undefined,
+      onSave: async (draft) => {
+        preset.displayName = draft.name;
+        preset.targetProperty = draft.targetProperty;
+        preset.parser = draft.parser;
+        preset.prompts[lang] = draft.text;
+        await this.plugin.saveSettings();
+        this.display();
+      },
+    }).open();
+  }
+
+  private editCustom(tpl: CustomPromptTemplate): void {
+    new PromptEditorModal(this.app, {
+      title: "Edit prompt",
+      draft: {
+        name: tpl.name,
+        targetProperty: tpl.targetProperty,
+        parser: tpl.parser,
+        text: tpl.prompt,
+      },
+      onSave: async (draft) => {
+        tpl.name = draft.name;
+        tpl.targetProperty = draft.targetProperty;
+        tpl.parser = draft.parser;
+        tpl.prompt = draft.text;
+        await this.plugin.saveSettings();
+        this.display();
+      },
+    }).open();
+  }
+
+  private async deletePreset(preset: GeneratorPreset): Promise<void> {
+    const ok = await confirmModal(this.app, {
+      title: "Delete prompt?",
+      message: `Remove "${preset.displayName}"? You can restore built-in prompts afterwards.`,
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!ok) return;
+    this.plugin.settings.presets = this.plugin.settings.presets.filter(
+      (p) => p.id !== preset.id,
+    );
+    await this.plugin.saveSettings();
+    this.display();
+  }
+
+  private async deleteCustom(tpl: CustomPromptTemplate): Promise<void> {
+    const ok = await confirmModal(this.app, {
+      title: "Delete prompt?",
+      message: `Remove "${tpl.name}"?`,
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!ok) return;
+    this.plugin.settings.customPrompts =
+      this.plugin.settings.customPrompts.filter((p) => p.id !== tpl.id);
+    await this.plugin.saveSettings();
+    this.display();
   }
 }

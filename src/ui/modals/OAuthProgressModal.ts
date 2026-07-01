@@ -1,4 +1,5 @@
-import { App, Modal, Notice } from "obsidian";
+import { App, Notice } from "obsidian";
+import { DraggableModal } from "./DraggableModal";
 import { openExternal } from "../../auth/openExternal";
 
 export interface OAuthProgressOptions {
@@ -27,7 +28,7 @@ export interface OAuthProgressController {
   readonly signal: AbortSignal;
 }
 
-export class OAuthProgressModal extends Modal {
+export class OAuthProgressModal extends DraggableModal {
   private statusEl: HTMLElement | null = null;
   private codeEl: HTMLElement | null = null;
   private linkEl: HTMLElement | null = null;

@@ -1,4 +1,5 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
+import { App, Notice, setIcon } from "obsidian";
+import { DraggableModal } from "./DraggableModal";
 import type FrontmatterEditorPlugin from "../../main";
 import type {
   ActionPreview,
@@ -10,7 +11,7 @@ import { confirmModal } from "./ConfirmModal";
 
 const PREVIEW_LIMIT = 100;
 
-export abstract class BaseActionModal extends Modal {
+export abstract class BaseActionModal extends DraggableModal {
   protected previewEl: HTMLElement | null = null;
   protected statusEl: HTMLElement | null = null;
   protected applyBtn: HTMLButtonElement | null = null;
@@ -129,7 +130,7 @@ export abstract class BaseActionModal extends Modal {
     const summary = parts.join(", ");
     this.showUndoableNotice(summary, result.snapshotId ?? null);
     if (result.errors.length > 0) {
-      console.warn("frontmatter-editor: errors", result.errors);
+      console.warn("frontmatter-operator: errors", result.errors);
     }
     this.onDone();
     if (result.errorCount === 0) {
@@ -146,7 +147,7 @@ export abstract class BaseActionModal extends Modal {
     const notice = new Notice("", duration);
     const el = notice.noticeEl ?? notice.containerEl;
     el.empty();
-    el.createSpan({ text: `Frontmatter Editor: ${summary}` });
+    el.createSpan({ text: `Frontmatter Operator: ${summary}` });
     if (!snapshotId) return;
     const undoBtn = el.createEl("button", {
       text: "Undo",

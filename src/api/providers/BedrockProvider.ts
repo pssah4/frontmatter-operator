@@ -29,9 +29,15 @@ import type {
   ProviderConfig,
   RunModelOptions,
 } from "../../types/llm";
-import { ProviderError, recommendedMaxTokens } from "../../types/llm";
+import {
+  ProviderError,
+  recommendedMaxTokens,
+  modelSupportsTemperature,
+} from "../../types/llm";
 import type { ApiHandler } from "../types";
 import { assertValidHeader } from "../headerValidation";
+import { assertSafeProviderUrl } from "../providerUrlGuard";
+import { scrubAwsError } from "../fetchModels";
 
 const DEFAULT_GATEWAY_HEADER_NAME = "Ocp-Apim-Subscription-Key";
 
@@ -82,9 +88,14 @@ export class BedrockProvider implements ApiHandler {
       );
     }
 
+    // L-2 (AUDIT 2026-07-01): the endpoint override is user-editable; guard it
+    // before SigV4-signed requests reach it (https only, no cloud-metadata host).
+    const endpoint = provider.baseUrl?.trim();
+    if (endpoint) assertSafeProviderUrl(endpoint, "bedrock");
+
     const clientConfig: BedrockRuntimeClientConfig = {
       region,
-      ...(provider.baseUrl?.trim() ? { endpoint: provider.baseUrl.trim() } : {}),
+      ...(endpoint ? { endpoint } : {}),
       // Gateway mode: route via Node http handler (bypasses Electron's
       // window.fetch CORS that enterprise gateways typically reject).
       ...(authMode === "gateway"
@@ -190,7 +201,13 @@ export class BedrockProvider implements ApiHandler {
       this.model.maxTokens ??
       recommendedMaxTokens(this.model.modelId);
 
-    const temperature = req.temperature ?? this.model.temperature ?? 0;
+    // Newer models (Claude 5 generation, Opus 4.7+, Fable/Mythos, GPT-5)
+    // dropped the sampling parameters and reject any value with
+    // "ValidationException: `temperature` is deprecated for this model".
+    // Omit temperature entirely for those; VO does the same.
+    const temperature = modelSupportsTemperature(this.model.modelId)
+      ? (req.temperature ?? this.model.temperature ?? 0)
+      : undefined;
 
     const command = new ConverseCommand({
       modelId: this.model.modelId,
@@ -198,7 +215,7 @@ export class BedrockProvider implements ApiHandler {
       system: system.length > 0 ? system : undefined,
       inferenceConfig: {
         maxTokens,
-        temperature,
+        ...(temperature !== undefined ? { temperature } : {}),
       },
     });
 
@@ -264,8 +281,13 @@ export function enhanceBedrockError(
     return new ProviderError(`Bedrock: ${String(err)}`, "bedrock");
   }
   const name = err.name || "Error";
-  const msg = err.message || String(err);
-  const lower = msg.toLowerCase();
+  // I-2 (AUDIT 2026-07-02): scrub AWS credential material (Credential=,
+  // Signature=, AKIA/ASIA, session token) before the message is embedded in
+  // a user-facing ProviderError. Branch matching uses the raw lowercased
+  // message so the scrub cannot shift the classification.
+  const rawMsg = err.message || String(err);
+  const msg = scrubAwsError(rawMsg);
+  const lower = rawMsg.toLowerCase();
 
   // Access denied / model-access not granted in the AWS console.
   if (

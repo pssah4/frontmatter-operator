@@ -1,4 +1,5 @@
-import { App, Modal, Notice, Setting } from "obsidian";
+import { App, Notice, Setting } from "obsidian";
+import { DraggableModal } from "../modals/DraggableModal";
 import type FrontmatterEditorPlugin from "../../main";
 import {
   DEFAULT_API_VERSIONS,
@@ -25,7 +26,7 @@ import { OAuthProgressModal } from "../modals/OAuthProgressModal";
  * Decode parameters (max tokens, temperature, thinking budget) do NOT live
  * here -- they are picked per generation run in the AI chat modal.
  */
-export class ProviderDetailModal extends Modal {
+export class ProviderDetailModal extends DraggableModal {
   private form: ProviderConfig;
   private isNew: boolean;
   private testEl: HTMLElement | null = null;
@@ -448,7 +449,7 @@ export class ProviderDetailModal extends Modal {
   /**
    * Pick the model id Test-Connection should ping. Mirrors VO's
    * pickModelForTest (ProviderDetailModal.ts:603-631) with the
-   * frontmatter-editor simplification (no tier mapping):
+   * frontmatter-operator simplification (no tier mapping):
    *
    *   1. initialModelId (whatever the Default-Model picker shows -- if
    *      the user changed it, that's what we should test).
@@ -485,7 +486,7 @@ export class ProviderDetailModal extends Modal {
         try {
           // VO pattern (pickModelForTest, ProviderDetailModal.ts:603-631):
           // priority order is tier-overrides > tier-mapping > discovered
-          // models > hardcoded fallbacks. In frontmatter-editor we
+          // models > hardcoded fallbacks. In frontmatter-operator we
           // collapse tier-overrides+mapping into the single
           // initialModelId (the Default-Model picker), which is what the
           // user will actually use for Generate-with-AI -- testing

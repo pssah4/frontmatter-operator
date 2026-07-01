@@ -15,6 +15,7 @@ import {
 } from "./ValueCoercion";
 import { mapFmValue } from "./ValueMappingEngine";
 import type { SnapshotService } from "./SnapshotService";
+import { triggerBatchEvent, FM_BATCH_START, FM_BATCH_END } from "../batchEvents";
 
 // HARD-04: deny these as frontmatter property keys to prevent silent
 // prototype-chain reassignment on the per-note frontmatter object during
@@ -184,6 +185,32 @@ export function applyActionPure(
       }
       return { after, changed: true };
     }
+    case "map_values": {
+      if (!isAllowedKey(action.property)) {
+        return {
+          after,
+          changed: false,
+          skipped: `property "${action.property}" is reserved`,
+        };
+      }
+      if (!Object.prototype.hasOwnProperty.call(after, action.property)) {
+        return { after, changed: false, skipped: "property not present" };
+      }
+      const before = after[action.property];
+      const mapped = mapFmValue(
+        before as FmValue,
+        action.transforms,
+        action.valueMappings,
+      );
+      // Change detection: only notes whose value actually changes get
+      // snapshotted and rewritten -- a value not in the mapping table passes
+      // through untouched.
+      if (JSON.stringify(before) === JSON.stringify(mapped)) {
+        return { after, changed: false };
+      }
+      after[action.property] = mapped;
+      return { after, changed: true };
+    }
   }
 }
 
@@ -213,6 +240,21 @@ export class BulkActionService {
   }
 
   async executeAction(
+    rows: NoteRow[],
+    action: BulkAction,
+    onProgress?: (current: number, total: number) => void,
+  ): Promise<ActionResult> {
+    // Bracket the whole batch so the live view refreshes once at the end
+    // instead of redrawing per note while the loop runs.
+    triggerBatchEvent(this.app, FM_BATCH_START);
+    try {
+      return await this.executeActionInner(rows, action, onProgress);
+    } finally {
+      triggerBatchEvent(this.app, FM_BATCH_END);
+    }
+  }
+
+  private async executeActionInner(
     rows: NoteRow[],
     action: BulkAction,
     onProgress?: (current: number, total: number) => void,
@@ -296,6 +338,18 @@ export class BulkActionService {
   }
 
   async restoreSnapshot(
+    snapshot: Snapshot,
+    onProgress?: (current: number, total: number) => void,
+  ): Promise<ActionResult> {
+    triggerBatchEvent(this.app, FM_BATCH_START);
+    try {
+      return await this.restoreSnapshotInner(snapshot, onProgress);
+    } finally {
+      triggerBatchEvent(this.app, FM_BATCH_END);
+    }
+  }
+
+  private async restoreSnapshotInner(
     snapshot: Snapshot,
     onProgress?: (current: number, total: number) => void,
   ): Promise<ActionResult> {
@@ -428,6 +482,18 @@ export class BulkActionService {
               if (p !== action.toProperty) delete fm[p];
             }
           }
+          return;
+        }
+        case "map_values": {
+          if (!isAllowedKey(action.property)) return;
+          if (!Object.prototype.hasOwnProperty.call(fm, action.property)) return;
+          // Only reached for notes applyActionPure flagged as changed, so a
+          // plain rewrite is enough -- no change re-check needed here.
+          fm[action.property] = mapFmValue(
+            fm[action.property] as FmValue,
+            action.transforms,
+            action.valueMappings,
+          );
           return;
         }
       }

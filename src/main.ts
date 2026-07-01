@@ -10,7 +10,9 @@ import { SetActionModal } from "./ui/modals/SetActionModal";
 import { DeleteActionModal } from "./ui/modals/DeleteActionModal";
 import { RenameActionModal } from "./ui/modals/RenameActionModal";
 import { CopyMergeActionModal } from "./ui/modals/CopyMergeActionModal";
+import { RenameValuesActionModal } from "./ui/modals/RenameValuesActionModal";
 import { SnapshotsModal } from "./ui/modals/SnapshotsModal";
+import { confirmModal } from "./ui/modals/ConfirmModal";
 import { FrontmatterEditorAPI } from "./api/FrontmatterEditorAPI";
 import { GeneratorService } from "./services/generator/GeneratorService";
 import {
@@ -75,13 +77,13 @@ export default class FrontmatterEditorPlugin extends Plugin {
       (leaf) => new FrontmatterEditorView(leaf, this),
     );
 
-    this.addRibbonIcon("table", "Open Frontmatter Editor", () => {
+    this.addRibbonIcon("copy-slash", "Open Frontmatter Operator", () => {
       void this.activateView();
     });
 
     this.addCommand({
-      id: "open-frontmatter-editor",
-      name: "Open Frontmatter Editor",
+      id: "open-frontmatter-operator",
+      name: "Open Frontmatter Operator",
       callback: () => {
         void this.activateView();
       },
@@ -108,6 +110,14 @@ export default class FrontmatterEditorPlugin extends Plugin {
       name: "Rename frontmatter property on filtered notes...",
       callback: () => {
         void this.openActionModal("rename");
+      },
+    });
+
+    this.addCommand({
+      id: "rename-values",
+      name: "Rename frontmatter values on filtered notes...",
+      callback: () => {
+        void this.openActionModal("rename-values");
       },
     });
 
@@ -173,9 +183,9 @@ export default class FrontmatterEditorPlugin extends Plugin {
       name: "Print frontmatter property inventory to console",
       callback: () => {
         const props = this.scanner.scan().properties;
-        console.debug("[frontmatter-editor] property inventory:", props);
+        console.debug("[frontmatter-operator] property inventory:", props);
         new Notice(
-          `${props.length} unique properties — see developer console for full inventory.`,
+          `${props.length} unique properties. See developer console for full inventory.`,
         );
       },
     });
@@ -211,7 +221,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
       // have ANY frontmatter so the user can see what we're actually
       // looking at. Helps when the user expected hits but got none.
       console.debug(
-        "[frontmatter-editor] cleanup dry-run report:",
+        "[frontmatter-operator] cleanup dry-run report:",
         dry,
       );
       return;
@@ -220,14 +230,16 @@ export default class FrontmatterEditorPlugin extends Plugin {
       .sort((a, b) => b[1] - a[1])
       .map(([k, n]) => `${k} (${n})`)
       .join(", ");
-    const ok = window.confirm(
-      `Clean refusal text from frontmatter across the vault?\n\n` +
-        `Notes affected: ${dry.notesTouched} of ${dry.notesScanned}\n` +
-        `Items removed:  ${dry.itemsRemoved}\n` +
-        `Properties:     ${propsAffected}\n\n` +
-        `A snapshot is saved so the cleanup is undoable via ` +
-        `"Undo last frontmatter action".`,
-    );
+    const ok = await confirmModal(this.app, {
+      title: "Clean refusal text from frontmatter across the vault?",
+      message:
+        `Notes affected: ${dry.notesTouched} of ${dry.notesScanned}. ` +
+        `Items removed: ${dry.itemsRemoved}. Properties: ${propsAffected}. ` +
+        `A snapshot is saved so the cleanup can be undone from the ` +
+        `undo-last-frontmatter-action command.`,
+      confirmLabel: "Clean",
+      destructive: true,
+    });
     if (!ok) return;
     const real = await service.run({ dryRun: false });
     new Notice(
@@ -236,7 +248,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
       10_000,
     );
     console.debug(
-      "[frontmatter-editor] cleanup write report:",
+      "[frontmatter-operator] cleanup write report:",
       real,
     );
   }
@@ -268,15 +280,17 @@ export default class FrontmatterEditorPlugin extends Plugin {
       .sort((a, b) => b[1] - a[1])
       .map(([k, n]) => `${k} (${n})`)
       .join(", ");
-    const ok = window.confirm(
-      `Deduplicate wikilinks in ${scopeLabel}?\n\n` +
-        `Notes affected:     ${dry.notesTouched} of ${dry.notesScanned}\n` +
-        `Duplicates removed: ${dry.duplicatesRemoved}\n` +
-        `Links shortened:    ${dry.linksRewritten}\n` +
-        `Properties:         ${propsAffected}\n\n` +
-        `A snapshot is saved so the change is undoable via ` +
-        `"Undo last frontmatter action".`,
-    );
+    const ok = await confirmModal(this.app, {
+      title: `Deduplicate wikilinks in ${scopeLabel}?`,
+      message:
+        `Notes affected: ${dry.notesTouched} of ${dry.notesScanned}. ` +
+        `Duplicates removed: ${dry.duplicatesRemoved}. ` +
+        `Links shortened: ${dry.linksRewritten}. Properties: ${propsAffected}. ` +
+        `A snapshot is saved so the change can be undone from the ` +
+        `undo-last-frontmatter-action command.`,
+      confirmLabel: "Deduplicate",
+      destructive: true,
+    });
     if (!ok) return;
     const real = await service.run({ dryRun: false, paths: opts.paths });
     const errSuffix =
@@ -287,7 +301,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
         `Undo via "Undo last frontmatter action".`,
       10_000,
     );
-    console.debug("[frontmatter-editor] wikilink dedup report:", real);
+    console.debug("[frontmatter-operator] wikilink dedup report:", real);
   }
 
   async loadSettings(): Promise<void> {
@@ -339,7 +353,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
       const offenders = assertNoPlaintextSecrets(onDisk);
       if (offenders.length > 0) {
         console.warn(
-          "frontmatter-editor: plaintext secret fields detected on save:",
+          "frontmatter-operator: plaintext secret fields detected on save:",
           offenders,
         );
       }
@@ -383,7 +397,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
   }
 
   private async openActionModal(
-    kind: "set" | "delete" | "rename" | "copy" | "merge",
+    kind: "set" | "delete" | "rename" | "rename-values" | "copy" | "merge",
   ): Promise<void> {
     await this.activateView();
     const scan = this.scanner.scan();
@@ -406,6 +420,15 @@ export default class FrontmatterEditorPlugin extends Plugin {
         break;
       case "rename":
         new RenameActionModal(
+          this.app,
+          this,
+          rows,
+          scan.properties,
+          refresh,
+        ).open();
+        break;
+      case "rename-values":
+        new RenameValuesActionModal(
           this.app,
           this,
           rows,

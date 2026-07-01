@@ -1,4 +1,5 @@
-import { App, Modal } from "obsidian";
+import { App } from "obsidian";
+import { DraggableModal } from "./DraggableModal";
 
 export interface ConfirmModalOptions {
   title: string;
@@ -25,7 +26,7 @@ export function confirmModal(
   });
 }
 
-class ConfirmModalImpl extends Modal {
+class ConfirmModalImpl extends DraggableModal {
   private decided = false;
 
   constructor(
@@ -69,7 +70,7 @@ class ConfirmModalImpl extends Modal {
       this.decide(true);
     });
 
-    setTimeout(() => confirmBtn.focus(), 0);
+    window.setTimeout(() => confirmBtn.focus(), 0);
   }
 
   private decide(value: boolean): void {

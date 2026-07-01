@@ -1,9 +1,10 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
+import { App, Notice, setIcon } from "obsidian";
+import { DraggableModal } from "./DraggableModal";
 import type FrontmatterEditorPlugin from "../../main";
 import type { Snapshot } from "../../types";
 import { confirmModal } from "./ConfirmModal";
 
-export class SnapshotsModal extends Modal {
+export class SnapshotsModal extends DraggableModal {
   constructor(
     app: App,
     private plugin: FrontmatterEditorPlugin,
@@ -20,7 +21,7 @@ export class SnapshotsModal extends Modal {
 
     contentEl.createDiv({
       cls: "fm-editor-modal-hint",
-      text: "Every bulk action writes a JSON snapshot under .frontmatter-editor/snapshots/. Restore reverts the affected notes to their previous frontmatter. The 50 most recent snapshots are kept.",
+      text: "Every bulk action writes a JSON snapshot under the plugin data folder (plugins/frontmatter-operator/snapshots/). Restore reverts the affected notes to their previous frontmatter. The 50 most recent snapshots are kept.",
     });
 
     const list = contentEl.createDiv({ cls: "fm-editor-snapshot-list" });
@@ -28,7 +29,7 @@ export class SnapshotsModal extends Modal {
     if (snaps.length === 0) {
       list.createDiv({
         cls: "fm-editor-empty-hint",
-        text: "No snapshots yet — run an action to record the first one.",
+        text: "No snapshots yet. Run an action to record the first one.",
       });
       return;
     }
@@ -130,6 +131,21 @@ function describeAction(action: Snapshot["action"]): string {
         .filter(Boolean)
         .join(", ");
       return `${verb} ${sources} -> ${action.toProperty}${extras ? ` (${extras})` : ""}`;
+    }
+    case "map_values": {
+      const mapCount = action.valueMappings.length;
+      const transformCount = action.transforms.length;
+      const extras = [
+        transformCount > 0
+          ? `${transformCount} transform${transformCount === 1 ? "" : "s"}`
+          : null,
+        mapCount > 0
+          ? `${mapCount} value mapping${mapCount === 1 ? "" : "s"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return `rename values of ${action.property}${extras ? ` (${extras})` : ""}`;
     }
   }
 }

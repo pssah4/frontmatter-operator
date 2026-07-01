@@ -60,6 +60,7 @@ export const BULK_ACTION_TYPES = [
   "copy", // legacy -- kept so old snapshots replay; new writes emit 'transfer'
   "move", // legacy -- ditto
   "transfer",
+  "map_values", // in-place rewrite of a single property's values
 ] as const;
 
 /**
@@ -161,13 +162,30 @@ export interface MoveAction {
   wrapWikilink?: boolean;
 }
 
+/**
+ * In-place rewrite of the VALUES of a single property (keys stay). Reuses the
+ * same transforms + per-value mapping table as TransferAction, but targets one
+ * property and only touches notes whose value actually changes. Used by the
+ * "Rename values" action.
+ */
+export interface MapValuesAction {
+  type: "map_values";
+  /** The one property whose values are rewritten. */
+  property: string;
+  /** Bulk transforms applied to each value before the mapping table. */
+  transforms: ValueTransform[];
+  /** Per-distinct-value rewrite table. Missing entries pass through. */
+  valueMappings: ValueMapping[];
+}
+
 export type BulkAction =
   | SetAction
   | DeleteAction
   | RenameAction
   | CopyAction
   | MoveAction
-  | TransferAction;
+  | TransferAction
+  | MapValuesAction;
 
 export interface ActionPreview {
   path: string;

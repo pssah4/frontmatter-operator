@@ -24,6 +24,14 @@ describe("parseSingleLineText", () => {
     const r = parseSingleLineText("  \n  ");
     expect(r.ok).toBe(false);
   });
+
+  it("I-1: strips control characters", () => {
+    const bell = String.fromCharCode(7);
+    const del = String.fromCharCode(127);
+    const r = parseSingleLineText(`clean${bell}sen${del}tence`);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toBe("cleansentence");
+  });
 });
 
 describe("parseStringList", () => {
@@ -56,6 +64,14 @@ describe("parseStringList", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value).toEqual(["AI", "ml"]);
   });
+
+  it("L-5: strips control characters from list items", () => {
+    const bell = String.fromCharCode(7);
+    const del = String.fromCharCode(127);
+    const r = parseStringList(`- clean${bell}value\n- second${del}item`);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toEqual(["cleanvalue", "seconditem"]);
+  });
 });
 
 describe("parseMocPayload", () => {
@@ -82,5 +98,17 @@ describe("parseMocPayload", () => {
   it("rejects empty payload", () => {
     expect(parseMocPayload("").ok).toBe(false);
     expect(parseMocPayload("nothing here").ok).toBe(false);
+  });
+
+  it("I-1: strips control characters from topics and concepts", () => {
+    const bell = String.fromCharCode(7);
+    const del = String.fromCharCode(127);
+    const raw = `topics:\n  - Tra${bell}vel\nconcepts:\n  - Pla${del}ce\n`;
+    const r = parseMocPayload(raw);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.topics).toEqual(["Travel"]);
+      expect(r.value.concepts).toEqual(["Place"]);
+    }
   });
 });

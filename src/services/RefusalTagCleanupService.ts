@@ -28,12 +28,14 @@
 import type { App, TFile } from "obsidian";
 import type { SnapshotService } from "./SnapshotService";
 import type { Frontmatter, Snapshot } from "../types";
+import { triggerBatchEvent, FM_BATCH_START, FM_BATCH_END } from "../batchEvents";
 import {
   KNOWN_REFUSAL_SUBSTRINGS,
   isRefusalItem,
   listLooksLikeRefusal,
   looksLikeRefusal,
 } from "./generator/GeneratorService";
+import { isAllowedKey } from "./BulkActionService";
 
 /** Frontmatter keys we never touch even if they look suspicious. */
 const RESERVED_KEYS = new Set(["position", "tags-meta"]);
@@ -96,6 +98,15 @@ export class RefusalTagCleanupService {
   ) {}
 
   async run(opts: CleanupOptions = {}): Promise<CleanupReport> {
+    triggerBatchEvent(this.app, FM_BATCH_START);
+    try {
+      return await this.runInner(opts);
+    } finally {
+      triggerBatchEvent(this.app, FM_BATCH_END);
+    }
+  }
+
+  private async runInner(opts: CleanupOptions = {}): Promise<CleanupReport> {
     const dryRun = opts.dryRun ?? false;
     const scopedProperty = opts.property;
     const scope = opts.scope ?? "targeted";
@@ -239,6 +250,13 @@ export class RefusalTagCleanupService {
     for (const { file, patches } of writeQueue) {
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         for (const patch of patches) {
+          // I-3 (AUDIT 2026-07-02): parity with the other write paths
+          // (BulkAction, Generator, inline edit) -- reject __proto__ /
+          // constructor / prototype keys. patch.property comes from
+          // Object.keys(fm) so this is a symmetry guard, not a reachable
+          // exploit boundary, but it keeps the "isAllowedKey on every
+          // write path" invariant intact.
+          if (!isAllowedKey(patch.property)) continue;
           if (patch.nextValue === undefined) {
             delete fm[patch.property];
           } else {

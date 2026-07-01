@@ -1,6 +1,6 @@
 # Build output
-main.js
 *.tsbuildinfo
+main.js
 
 # Dependencies
 node_modules/
@@ -14,7 +14,8 @@ node_modules/
 .idea/
 *.swp
 *.swo
-
+.claude/
+_devprocess
 # OS
 .DS_Store
 Thumbs.db
