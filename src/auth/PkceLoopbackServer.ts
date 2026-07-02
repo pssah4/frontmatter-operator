@@ -12,6 +12,12 @@ export interface LoopbackCallback {
   state: string;
 }
 
+export interface LoopbackCallback {
+  code: string;
+  /** Raw `state` query param echoed back by the auth server ("" if absent). */
+  state: string;
+}
+
 interface ServerHandle {
   port: number;
   close: () => void;
