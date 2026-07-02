@@ -1,13 +1,15 @@
 name: Release
 
 # Tag-driven release. The local release flow (bump manifest/package/versions,
-# commit, annotated tag vX.Y.Z, push main + tag) triggers this workflow. It
+# commit, annotated tag X.Y.Z, push main + tag) triggers this workflow. It
 # builds main.js from source and publishes a GitHub Release with the files
 # Obsidian needs. Nothing is done by hand in the GitHub UI.
+# Obsidian requires the release tag to equal manifest.json "version" EXACTLY,
+# so tags carry no v prefix.
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
   release:
@@ -34,11 +36,11 @@ jobs:
 
       - name: Verify manifest version matches tag
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
           MANIFEST="$(jq -r .version manifest.json)"
           echo "tag=${TAG} manifest=${MANIFEST}"
           if [ "${TAG}" != "${MANIFEST}" ]; then
-            echo "::error::Tag v${TAG} does not match manifest.json version ${MANIFEST}"
+            echo "::error::Tag ${TAG} does not match manifest.json version ${MANIFEST}"
             exit 1
           fi
 
