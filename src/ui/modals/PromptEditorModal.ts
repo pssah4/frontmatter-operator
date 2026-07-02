@@ -58,7 +58,7 @@ export class PromptEditorModal extends DraggableModal {
       .setDesc("The frontmatter key this prompt writes to.")
       .addText((t) =>
         t
-          .setPlaceholder("e.g. description")
+          .setPlaceholder("Example: description")
           .setValue(this.draft.targetProperty)
           .onChange((v) => {
             this.draft.targetProperty = v.trim();
@@ -66,9 +66,9 @@ export class PromptEditorModal extends DraggableModal {
       );
 
     new Setting(contentEl).setName("Output format").addDropdown((d) => {
-      (Object.keys(PARSER_LABELS) as GeneratorParserId[]).forEach((k) =>
-        d.addOption(k, PARSER_LABELS[k]),
-      );
+      (Object.keys(PARSER_LABELS) as GeneratorParserId[]).forEach((k) => {
+        d.addOption(k, PARSER_LABELS[k]);
+      });
       d.setValue(this.draft.parser);
       d.onChange((v) => {
         this.draft.parser = v as GeneratorParserId;
@@ -102,9 +102,8 @@ export class PromptEditorModal extends DraggableModal {
         cls: "fm-editor-btn mod-warning",
         text: "Reset to default",
       });
-      reset.addEventListener("click", async () => {
-        await this.options.onReset?.();
-        this.close();
+      reset.addEventListener("click", () => {
+        void this.handleReset();
       });
     }
 
@@ -118,19 +117,28 @@ export class PromptEditorModal extends DraggableModal {
       cls: "fm-editor-btn mod-cta",
       text: "Save",
     });
-    save.addEventListener("click", async () => {
-      this.draft.text = ta.value;
-      if (!this.draft.name.trim()) {
-        new Notice("Name is required");
-        return;
-      }
-      if (!this.draft.targetProperty.trim()) {
-        new Notice("Target property is required");
-        return;
-      }
-      await this.options.onSave({ ...this.draft });
-      this.close();
+    save.addEventListener("click", () => {
+      void this.handleSave(ta);
     });
+  }
+
+  private async handleReset(): Promise<void> {
+    await this.options.onReset?.();
+    this.close();
+  }
+
+  private async handleSave(ta: HTMLTextAreaElement): Promise<void> {
+    this.draft.text = ta.value;
+    if (!this.draft.name.trim()) {
+      new Notice("Name is required");
+      return;
+    }
+    if (!this.draft.targetProperty.trim()) {
+      new Notice("Target property is required");
+      return;
+    }
+    await this.options.onSave({ ...this.draft });
+    this.close();
   }
 
   onClose(): void {

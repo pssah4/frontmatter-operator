@@ -21,7 +21,6 @@ interface ElectronSafeStorage {
 
 function getSafeStorage(): ElectronSafeStorage | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- electron is a runtime-only import in Obsidian
     const electron = (window as unknown as { require?: (id: string) => unknown }).require?.("electron");
     if (!electron) return null;
     const remote = (electron as { remote?: { safeStorage?: ElectronSafeStorage } }).remote;
@@ -81,7 +80,7 @@ export class SafeStorageService {
     if (warnedThisSession) return;
     warnedThisSession = true;
     new Notice(
-      "Frontmatter Operator: OS keychain unavailable -- API keys are stored as plaintext in this vault's data.json. Restrict file access accordingly.",
+      "Frontmatter operator: OS keychain unavailable -- API keys are stored as plaintext in this vault's data.json. Restrict file access accordingly.",
       8_000,
     );
   }

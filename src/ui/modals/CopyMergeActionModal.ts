@@ -206,7 +206,7 @@ export class CopyMergeActionModal extends BaseActionModal {
       .setDesc("Where the values land.")
       .addText((text) => {
         text
-          .setPlaceholder("e.g. category")
+          .setPlaceholder("Example: category")
           .setValue(this.toProperty)
           .onChange((value) => {
             this.toProperty = value;

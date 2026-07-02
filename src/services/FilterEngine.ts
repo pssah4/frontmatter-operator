@@ -15,7 +15,10 @@ export function isRegexAllowed(source: string): boolean {
   return source.length > 0 && source.length <= MAX_REGEX_SOURCE_LENGTH;
 }
 
-function toComparableString(v: unknown, caseSensitive: boolean): string {
+function toComparableString(
+  v: FmValue | undefined,
+  caseSensitive: boolean,
+): string {
   if (v === null || v === undefined) return "";
   let s: string;
   if (Array.isArray(v)) s = v.map((x) => String(x)).join(", ");
@@ -27,6 +30,7 @@ function toComparableString(v: unknown, caseSensitive: boolean): string {
 function arrayItems(v: FmValue | undefined): string[] {
   if (v === null || v === undefined) return [];
   if (Array.isArray(v)) return v.map((x) => String(x));
+  if (typeof v === "object") return [JSON.stringify(v)];
   return [String(v)];
 }
 

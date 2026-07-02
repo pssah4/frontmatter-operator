@@ -77,13 +77,13 @@ export default class FrontmatterEditorPlugin extends Plugin {
       (leaf) => new FrontmatterEditorView(leaf, this),
     );
 
-    this.addRibbonIcon("copy-slash", "Open Frontmatter Operator", () => {
+    this.addRibbonIcon("copy-slash", "Open frontmatter operator", () => {
       void this.activateView();
     });
 
     this.addCommand({
-      id: "open-frontmatter-operator",
-      name: "Open Frontmatter Operator",
+      id: "open",
+      name: "Open editor view",
       callback: () => {
         void this.activateView();
       },
@@ -189,10 +189,6 @@ export default class FrontmatterEditorPlugin extends Plugin {
         );
       },
     });
-  }
-
-  async onunload(): Promise<void> {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_FRONTMATTER_EDITOR);
   }
 
   /**
@@ -366,11 +362,14 @@ export default class FrontmatterEditorPlugin extends Plugin {
     // edits per language; fill missing languages from the canonical
     // defaults so the 11-language expansion doesn't break old saves
     // that only had en+de.
-    if (!stored || stored.length === 0) return JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+    if (!stored || stored.length === 0)
+      return JSON.parse(
+        JSON.stringify(DEFAULT_PRESETS),
+      ) as typeof DEFAULT_PRESETS;
     const byId = new Map(stored.map((p) => [p.id, p]));
     const merged = DEFAULT_PRESETS.map((d) => {
       const existing = byId.get(d.id);
-      if (!existing) return JSON.parse(JSON.stringify(d));
+      if (!existing) return JSON.parse(JSON.stringify(d)) as typeof d;
       return fillMissingLanguagePrompts({
         ...d,
         prompts: { ...d.prompts, ...(existing.prompts ?? {}) },
@@ -393,7 +392,7 @@ export default class FrontmatterEditorPlugin extends Plugin {
         active: true,
       });
     }
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   private async openActionModal(

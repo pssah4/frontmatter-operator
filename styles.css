@@ -471,8 +471,8 @@
   background: transparent;
 }
 
-.fm-editor-empty-cell {
-  padding: var(--size-4-6) var(--size-4-4) !important;
+.fm-editor-table td.fm-editor-empty-cell {
+  padding: var(--size-4-6) var(--size-4-4);
   text-align: center;
   color: var(--text-muted);
   font-style: italic;
@@ -525,10 +525,11 @@
 
 /* column add cell */
 
-.fm-editor-col-add {
+.fm-editor-table th.fm-editor-col-add,
+.fm-editor-table td.fm-editor-col-add {
   width: 36px;
   text-align: center;
-  border-left: 1px solid var(--background-modifier-border) !important;
+  border-left: 1px solid var(--background-modifier-border);
 }
 
 .fm-editor-col-add-btn {
@@ -953,7 +954,7 @@
    no fill, full-strength --text-muted, 16px icon + 4px/6px padding (24px tall).
    The class repetition bumps specificity to (0,2,0) so we beat Obsidian's
    native `button:not(.clickable-icon)` styling (0,1,1) -- background, border
-   and box-shadow -- without !important. */
+   and box-shadow -- without importance overrides. */
 .fm-editor-icon-btn.fm-editor-icon-btn {
   display: flex;
   align-items: center;

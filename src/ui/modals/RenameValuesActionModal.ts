@@ -64,7 +64,7 @@ export class RenameValuesActionModal extends BaseActionModal {
       .setDesc("The property whose values you want to rename.")
       .addText((text) => {
         text
-          .setPlaceholder("e.g. type")
+          .setPlaceholder("Example: type")
           .setValue(this.property)
           .onChange((value) => {
             this.property = value;

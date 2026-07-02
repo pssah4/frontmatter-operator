@@ -53,7 +53,7 @@ export abstract class BaseActionModal extends DraggableModal {
     this.previewEl = contentEl.createDiv({ cls: "fm-editor-modal-preview" });
 
     const footer = contentEl.createDiv({ cls: "fm-editor-modal-footer" });
-    const left = footer.createDiv({ cls: "fm-editor-modal-footer-left" });
+    footer.createDiv({ cls: "fm-editor-modal-footer-left" });
     const right = footer.createDiv({ cls: "fm-editor-modal-footer-right" });
 
     const cancelBtn = right.createEl("button", {
@@ -69,7 +69,9 @@ export abstract class BaseActionModal extends DraggableModal {
     applyBtn.createSpan({
       text: "Apply",
     });
-    applyBtn.addEventListener("click", () => this.runApply());
+    applyBtn.addEventListener("click", () => {
+      void this.runApply();
+    });
     this.applyBtn = applyBtn;
   }
 
@@ -145,7 +147,7 @@ export abstract class BaseActionModal extends DraggableModal {
   private showUndoableNotice(summary: string, snapshotId: string | null): void {
     const duration = snapshotId ? 12_000 : 4_000;
     const notice = new Notice("", duration);
-    const el = notice.noticeEl ?? notice.containerEl;
+    const el = notice.messageEl;
     el.empty();
     el.createSpan({ text: `Frontmatter Operator: ${summary}` });
     if (!snapshotId) return;
@@ -153,20 +155,24 @@ export abstract class BaseActionModal extends DraggableModal {
       text: "Undo",
       cls: "fm-editor-notice-undo",
     });
-    undoBtn.addEventListener("click", async (ev) => {
+    undoBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       notice.hide();
-      const snap = await this.plugin.snapshots.get(snapshotId);
-      if (!snap) {
-        new Notice("Snapshot not found.");
-        return;
-      }
-      const undoResult = await this.plugin.bulk.restoreSnapshot(snap);
-      new Notice(
-        `Undo: ${undoResult.successCount} restored, ${undoResult.errorCount} errors`,
-      );
-      this.onDone();
+      void this.undoSnapshot(snapshotId);
     });
+  }
+
+  private async undoSnapshot(snapshotId: string): Promise<void> {
+    const snap = await this.plugin.snapshots.get(snapshotId);
+    if (!snap) {
+      new Notice("Snapshot not found.");
+      return;
+    }
+    const undoResult = await this.plugin.bulk.restoreSnapshot(snap);
+    new Notice(
+      `Undo: ${undoResult.successCount} restored, ${undoResult.errorCount} errors`,
+    );
+    this.onDone();
   }
 
   protected setStatus(text: string): void {

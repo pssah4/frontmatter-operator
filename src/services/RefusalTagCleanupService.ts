@@ -27,7 +27,7 @@
 
 import type { App, TFile } from "obsidian";
 import type { SnapshotService } from "./SnapshotService";
-import type { Frontmatter, Snapshot } from "../types";
+import type { FmValue, Frontmatter, Snapshot } from "../types";
 import { triggerBatchEvent, FM_BATCH_START, FM_BATCH_END } from "../batchEvents";
 import {
   KNOWN_REFUSAL_SUBSTRINGS,
@@ -118,7 +118,7 @@ export class RefusalTagCleanupService {
       file: TFile;
       patches: Array<{
         property: string;
-        nextValue: unknown | undefined; // undefined = delete the key
+        nextValue: unknown; // undefined = delete the key
       }>;
     }
     const writeQueue: PendingWrite[] = [];
@@ -126,7 +126,8 @@ export class RefusalTagCleanupService {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       opts.onProgress?.(i + 1, files.length, file);
-      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const fm: Frontmatter | undefined =
+        this.app.metadataCache.getFileCache(file)?.frontmatter;
       if (!fm) continue;
 
       const patches: PendingWrite["patches"] = [];
@@ -248,7 +249,7 @@ export class RefusalTagCleanupService {
     await this.snapshots.save(snap);
 
     for (const { file, patches } of writeQueue) {
-      await this.app.fileManager.processFrontMatter(file, (fm) => {
+      await this.app.fileManager.processFrontMatter(file, (fm: Frontmatter) => {
         for (const patch of patches) {
           // I-3 (AUDIT 2026-07-02): parity with the other write paths
           // (BulkAction, Generator, inline edit) -- reject __proto__ /
@@ -260,7 +261,7 @@ export class RefusalTagCleanupService {
           if (patch.nextValue === undefined) {
             delete fm[patch.property];
           } else {
-            fm[patch.property] = patch.nextValue as never;
+            fm[patch.property] = patch.nextValue as FmValue;
           }
         }
       });

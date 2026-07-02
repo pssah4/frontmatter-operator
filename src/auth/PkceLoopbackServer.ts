@@ -6,8 +6,6 @@
  * shuts itself down.
  */
 
-import { Notice } from "obsidian";
-
 export interface LoopbackCallback {
   code: string;
   /** Raw `state` query param echoed back by the auth server ("" if absent). */
@@ -60,7 +58,7 @@ export async function startLoopbackServer(
   let http: HttpServerModule;
   try {
     http = nodeRequire<HttpServerModule>("http");
-  } catch (err) {
+  } catch {
     throw new Error(
       "Node http module unavailable. Loopback OAuth requires desktop Obsidian.",
     );

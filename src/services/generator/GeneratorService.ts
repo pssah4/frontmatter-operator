@@ -143,7 +143,7 @@ export class GeneratorService {
       // then overwrite the bad list with the fresh, clean one.
       if (conflictMode === "skip") {
         const meta = this.app.metadataCache.getFileCache(file);
-        const existing = meta?.frontmatter?.[opts.preset.targetProperty];
+        const existing: unknown = meta?.frontmatter?.[opts.preset.targetProperty];
         const isPollutedList =
           opts.preset.parser === "list_string" &&
           Array.isArray(existing) &&
@@ -361,7 +361,7 @@ export class GeneratorService {
           fm[property] = {
             topics: payload.topics,
             concepts: payload.concepts,
-          } as never;
+          };
           return;
         }
         // append (or skip-with-race): merge
@@ -372,13 +372,13 @@ export class GeneratorService {
         fm[property] = {
           topics: mergeStringLists(arr(existing.topics), payload.topics),
           concepts: mergeStringLists(arr(existing.concepts), payload.concepts),
-        } as never;
+        };
         return;
       }
       if (parserId === "list_string") {
         const incoming = Array.isArray(value) ? (value as unknown[]).map(String) : [];
         if (conflictMode === "overwrite" || targetEmpty) {
-          fm[property] = incoming as never;
+          fm[property] = incoming;
           return;
         }
         // append (or skip-with-race): merge. CRITICAL guard --
@@ -391,7 +391,7 @@ export class GeneratorService {
         // leak the user reported after the third "supposedly
         // final" fix.
         const cleanExisting = sanitizeExistingListString(arr(existingRaw));
-        fm[property] = mergeStringLists(cleanExisting, incoming) as never;
+        fm[property] = mergeStringLists(cleanExisting, incoming);
         return;
       }
       // single_line_text (description et al.)
@@ -652,6 +652,7 @@ export function sanitizeExistingListString(existing: string[]): string[] {
  * injections that hide instructions in non-printable bytes.
  */
 function sanitiseForPrompt(s: string): string {
+  // eslint-disable-next-line no-control-regex -- intentionally matches control chars to sanitize LLM prompt input
   return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
@@ -698,7 +699,6 @@ export async function waitForMetadataChange(
     const finish = () => {
       if (done) return;
       done = true;
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- ref is captured by the listener closure below
       app.metadataCache.offref(ref);
       window.clearTimeout(timer);
       resolve();

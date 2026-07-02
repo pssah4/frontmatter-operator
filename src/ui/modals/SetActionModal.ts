@@ -46,7 +46,7 @@ export class SetActionModal extends BaseActionModal {
       .setDesc("The frontmatter key to set.")
       .addText((text) => {
         text
-          .setPlaceholder("e.g. type")
+          .setPlaceholder("Example: type")
           .onChange((value) => {
             this.property = value;
           });

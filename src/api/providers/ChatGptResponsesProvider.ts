@@ -213,7 +213,7 @@ function openStream(
   signal?: AbortSignal,
 ): Promise<NodeStreamResponse> {
   const parsed = new URL(url);
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Node https is the only Electron-renderer transport that bypasses CORS for chatgpt.com (same as VO)
+  // Node https is the only Electron-renderer transport that bypasses CORS for chatgpt.com (same as VO)
   const https = (window as unknown as { require: (id: string) => unknown }).require(
     "https",
   ) as typeof import("https");

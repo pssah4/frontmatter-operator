@@ -115,7 +115,7 @@ export async function buildApiHandler(
     default:
       throw new ProviderError(
         `Unknown provider type: ${(provider as { type: string }).type}`,
-        (provider as ProviderConfig).type,
+        provider.type,
       );
   }
 }

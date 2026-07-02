@@ -23,7 +23,7 @@ export class RenameActionModal extends BaseActionModal {
       .setDesc("The property as it exists today.")
       .addText((text) => {
         text
-          .setPlaceholder("e.g. Beschreibung")
+          .setPlaceholder("Example: Beschreibung")
           .onChange((value) => {
             this.fromProperty = value;
           });
@@ -38,7 +38,7 @@ export class RenameActionModal extends BaseActionModal {
       .setDesc("The desired property name.")
       .addText((text) => {
         text
-          .setPlaceholder("e.g. description")
+          .setPlaceholder("Example: description")
           .onChange((value) => {
             this.toProperty = value;
           });

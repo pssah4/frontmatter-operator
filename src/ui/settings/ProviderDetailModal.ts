@@ -9,7 +9,6 @@ import {
   getDefaultModelForProvider,
   newProviderId,
   type AwsAuthMode,
-  type DiscoveredModel,
   type ProviderConfig,
   type ProviderType,
 } from "../../types/llm";
@@ -50,7 +49,7 @@ export class ProviderDetailModal extends DraggableModal {
     super(app);
     this.isNew = !initial;
     this.form = initial
-      ? JSON.parse(JSON.stringify(initial))
+      ? (JSON.parse(JSON.stringify(initial)) as ProviderConfig)
       : ({
           id: newProviderId(),
           type: "anthropic",
@@ -137,10 +136,10 @@ export class ProviderDetailModal extends DraggableModal {
       new Setting(parent)
         .setName("Default model")
         .setDesc(
-          "This provider has no static suggestions. Type the model id you want as the default.",
+          "This provider has no static suggestions. Type the model ID you want as the default.",
         )
         .addText((t) => {
-          t.setPlaceholder("model-id");
+          t.setPlaceholder("Model ID");
           t.setValue(this.initialModelId);
           t.onChange((v) => {
             this.initialModelId = v.trim();
@@ -251,7 +250,7 @@ export class ProviderDetailModal extends DraggableModal {
         .setDesc(apiKeyHint(p))
         .addText((t) => {
           t.inputEl.type = "password";
-          t.setPlaceholder("sk-...").setValue(this.form.apiKey ?? "").onChange((v) => {
+          t.setPlaceholder("API key").setValue(this.form.apiKey ?? "").onChange((v) => {
             this.form.apiKey = v;
           });
         });
@@ -287,10 +286,10 @@ export class ProviderDetailModal extends DraggableModal {
 
   private renderBedrockAuth(parent: HTMLElement): void {
     new Setting(parent)
-      .setName("AWS region")
+      .setName("Bedrock region")
+      .setDesc("For example eu-central-1.")
       .addText((t) => {
-        t.setPlaceholder("eu-central-1")
-          .setValue(this.form.awsRegion ?? "")
+        t.setValue(this.form.awsRegion ?? "")
           .onChange((v) => {
             this.form.awsRegion = v;
           });
@@ -299,8 +298,8 @@ export class ProviderDetailModal extends DraggableModal {
       .setName("Auth mode")
       .addDropdown((d) => {
         d.addOption("api-key", "API key (bearer)");
-        d.addOption("access-key", "IAM Access Key (SigV4)");
-        d.addOption("gateway", "Enterprise Gateway");
+        d.addOption("access-key", "Access key (signature v4)");
+        d.addOption("gateway", "Enterprise gateway");
         d.setValue(this.form.awsAuthMode ?? "api-key");
         d.onChange((v) => {
           this.form.awsAuthMode = v as AwsAuthMode;
@@ -311,7 +310,7 @@ export class ProviderDetailModal extends DraggableModal {
     if (mode === "api-key") {
       new Setting(parent)
         .setName("Bedrock API key")
-        .setDesc("Bedrock API keys are runtime-only. Use Access Key mode to enable model discovery.")
+        .setDesc("Bedrock API keys are runtime-only. Use access key mode to enable model discovery.")
         .addText((t) => {
           t.inputEl.type = "password";
           t.setValue(this.form.awsApiKey ?? "").onChange((v) => {
@@ -320,7 +319,7 @@ export class ProviderDetailModal extends DraggableModal {
         });
     } else if (mode === "access-key") {
       new Setting(parent)
-        .setName("Access key id")
+        .setName("Access key ID")
         .addText((t) => {
           t.setValue(this.form.awsAccessKey ?? "").onChange((v) => {
             this.form.awsAccessKey = v;
@@ -388,14 +387,14 @@ export class ProviderDetailModal extends DraggableModal {
       .setName("Manual token (alternative to device flow)")
       .addText((t) => {
         t.inputEl.type = "password";
-        t.setPlaceholder("paste kilo-token")
+        t.setPlaceholder("Paste kilo-token")
           .setValue(this.plugin.settings.kiloToken ?? "")
           .onChange(async (v) => {
             if (v) await this.plugin.kiloAuth.setManualToken(v);
           });
       });
     new Setting(parent)
-      .setName("Organization id (optional)")
+      .setName("Organization ID (optional)")
       .addText((t) => {
         t.setValue(this.plugin.settings.kiloOrganizationId ?? "").onChange(
           async (v) => {
@@ -495,7 +494,7 @@ export class ProviderDetailModal extends DraggableModal {
           const modelId = this.pickModelForTest();
           if (!modelId) {
             this.testEl.setText(
-              "No model id available. Pick one in DEFAULT MODEL or Refresh in Discovery first.",
+              "No model ID available. Pick a default model or refresh in discovery first.",
             );
             return;
           }
@@ -556,7 +555,7 @@ export class ProviderDetailModal extends DraggableModal {
               new Notice(`Fetch failed: ${result.error}`);
               return;
             }
-            this.form.discoveredModels = result.models as DiscoveredModel[];
+            this.form.discoveredModels = result.models;
             this.form.discoveredAt = Date.now();
             // Family-aware promote: AWS sometimes returns the
             // version-less form (eu.anthropic.claude-opus-4-6) while
@@ -613,30 +612,32 @@ export class ProviderDetailModal extends DraggableModal {
       text: this.isNew ? "Add provider" : "Save",
       cls: "fm-editor-btn mod-cta",
     });
-    save.addEventListener("click", async () => {
-      if (!this.form.displayName.trim()) {
-        new Notice("Display name is required");
-        return;
-      }
-      const list = this.plugin.settings.providers.filter((p) => p.id !== this.form.id);
-      list.push(this.form);
-      this.plugin.settings.providers = list;
-      if (!this.plugin.settings.defaultProviderId && this.form.enabled) {
-        this.plugin.settings.defaultProviderId = this.form.id;
-      }
-      // Persist the picked default model. Generate-with-AI reads this on
-      // its first run for the provider; without it the picker has no
-      // sensible pre-selection on a fresh add.
-      if (this.initialModelId) {
-        if (!this.plugin.settings.lastUsedModelByProvider) {
-          this.plugin.settings.lastUsedModelByProvider = {};
+    save.addEventListener("click", () => {
+      void (async () => {
+        if (!this.form.displayName.trim()) {
+          new Notice("Display name is required");
+          return;
         }
-        this.plugin.settings.lastUsedModelByProvider[this.form.id] =
-          this.initialModelId;
-      }
-      await this.plugin.saveSettings();
-      this.onSaved();
-      this.close();
+        const list = this.plugin.settings.providers.filter((p) => p.id !== this.form.id);
+        list.push(this.form);
+        this.plugin.settings.providers = list;
+        if (!this.plugin.settings.defaultProviderId && this.form.enabled) {
+          this.plugin.settings.defaultProviderId = this.form.id;
+        }
+        // Persist the picked default model. Generate-with-AI reads this on
+        // its first run for the provider; without it the picker has no
+        // sensible pre-selection on a fresh add.
+        if (this.initialModelId) {
+          if (!this.plugin.settings.lastUsedModelByProvider) {
+            this.plugin.settings.lastUsedModelByProvider = {};
+          }
+          this.plugin.settings.lastUsedModelByProvider[this.form.id] =
+            this.initialModelId;
+        }
+        await this.plugin.saveSettings();
+        this.onSaved();
+        this.close();
+      })();
     });
   }
 

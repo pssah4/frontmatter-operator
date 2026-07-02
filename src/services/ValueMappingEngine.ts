@@ -89,7 +89,7 @@ export function mapFmValue(
   if (Array.isArray(v)) {
     const out: FmValue[] = [];
     for (const el of v) {
-      const mapped = mapScalar(el as FmValue, transforms, mappings);
+      const mapped = mapScalar(el, transforms, mappings);
       // Drop empty-string mappings (user explicitly deleted that value).
       if (typeof mapped === "string" && mapped === "") continue;
       out.push(mapped);

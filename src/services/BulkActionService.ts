@@ -27,7 +27,7 @@ export function isAllowedKey(key: string): boolean {
 }
 
 function cloneFrontmatter(fm: Frontmatter): Frontmatter {
-  return JSON.parse(JSON.stringify(fm));
+  return JSON.parse(JSON.stringify(fm)) as Frontmatter;
 }
 
 /**
@@ -198,7 +198,7 @@ export function applyActionPure(
       }
       const before = after[action.property];
       const mapped = mapFmValue(
-        before as FmValue,
+        before,
         action.transforms,
         action.valueMappings,
       );
@@ -374,12 +374,12 @@ export class BulkActionService {
         continue;
       }
       try {
-        await this.app.fileManager.processFrontMatter(file, (fm) => {
+        await this.app.fileManager.processFrontMatter(file, (fm: Frontmatter) => {
           for (const k of Object.keys(fm)) delete fm[k];
           if (entry.before) {
             for (const [k, v] of Object.entries(entry.before)) {
               if (!isAllowedKey(k)) continue;
-              fm[k] = v as unknown;
+              fm[k] = v;
             }
           }
         });
@@ -400,7 +400,7 @@ export class BulkActionService {
     file: TFile,
     action: BulkAction,
   ): Promise<void> {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await this.app.fileManager.processFrontMatter(file, (fm: Frontmatter) => {
       switch (action.type) {
         case "set": {
           if (!isAllowedKey(action.property)) return;
@@ -410,16 +410,16 @@ export class BulkActionService {
           );
           if (exists && action.mode === "skip_if_exists") return;
           const resolved = action.template && typeof action.value === "string"
-            ? resolveTemplate(action.value, fm as never)
+            ? resolveTemplate(action.value, fm)
             : action.value;
           if (action.template && (resolved === null || resolved === "")) return;
           const coerced = action.wrapWikilink
-            ? wrapAsWikilink(resolved as FmValue)
+            ? wrapAsWikilink(resolved)
             : resolved;
           if (exists && action.mode === "merge_list") {
             fm[action.property] = mergeListValues(
-              fm[action.property] as never,
-              coerced as FmValue,
+              fm[action.property],
+              coerced,
             );
           } else {
             fm[action.property] = coerced;
@@ -444,7 +444,7 @@ export class BulkActionService {
             .filter(isAllowedKey)
             .filter((p) => Object.prototype.hasOwnProperty.call(fm, p));
           if (sourceProps.length === 0) return;
-          let collected = sourceProps.map((p) => fm[p] as FmValue);
+          let collected = sourceProps.map((p) => fm[p]);
           if (action.type === "transfer") {
             collected = collected.map((v) =>
               mapFmValue(v, action.transforms, action.valueMappings),
@@ -452,11 +452,11 @@ export class BulkActionService {
           }
           let merged: FmValue =
             collected.length === 1
-              ? (collected[0] as FmValue)
-              : (collected.reduce(
-                  (acc, v) => mergeListValues(acc as FmValue, v as FmValue),
+              ? collected[0]
+              : collected.reduce(
+                  (acc, v) => mergeListValues(acc, v),
                   [] as FmValue,
-                ) as FmValue);
+                );
           if (action.wrapWikilink) merged = wrapAsWikilink(merged);
 
           const targetExists = Object.prototype.hasOwnProperty.call(
@@ -467,7 +467,7 @@ export class BulkActionService {
             if (action.onConflict === "skip") return;
             if (action.onConflict === "merge_list") {
               merged = mergeListValues(
-                fm[action.toProperty] as FmValue,
+                fm[action.toProperty],
                 merged,
               );
             }
@@ -490,7 +490,7 @@ export class BulkActionService {
           // Only reached for notes applyActionPure flagged as changed, so a
           // plain rewrite is enough -- no change re-check needed here.
           fm[action.property] = mapFmValue(
-            fm[action.property] as FmValue,
+            fm[action.property],
             action.transforms,
             action.valueMappings,
           );
