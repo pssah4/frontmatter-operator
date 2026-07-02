@@ -1,6 +1,6 @@
 {
   "name": "frontmatter-operator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Filter notes by frontmatter properties and apply bulk edits.",
   "main": "main.js",
   "scripts": {
