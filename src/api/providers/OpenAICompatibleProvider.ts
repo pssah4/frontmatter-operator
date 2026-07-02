@@ -3,7 +3,6 @@ import type {
   CompletionRequest,
   CompletionResult,
   ProviderConfig,
-  ProviderType,
   RunModelOptions,
 } from "../../types/llm";
 import {

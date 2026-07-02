@@ -9,7 +9,7 @@ The plugin has two faces:
 - An **interactive table view** for humans: a spreadsheet over your frontmatter with inline editing, per-column filters, and a WHEN / THEN action bar.
 - A typed, self-describing **programmatic API** plus 12 commands, so another plugin, a Templater script, an agent, or the command palette can drive it without touching the UI.
 
-This plugin is optimized to wotk together with the [**Vault Operator**](https://community.obsidian.md/plugins/vault-operator) agent.
+This plugin is optimized to work together with the [**Vault Operator**](https://community.obsidian.md/plugins/vault-operator) agent.
 
 
 ---
@@ -126,7 +126,7 @@ Each bulk action exists in three forms: a footer button plus modal in the UI, a 
 | Undo last | `frontmatter-operator:undo-last` | `undoLast()` | Restores the most recent snapshot. | no | no |
 | Open snapshots | `frontmatter-operator:open-snapshots` | `listSnapshots()` | Opens the snapshot manager (UI) / returns the list (API). | no | no |
 | List properties | `frontmatter-operator:list-properties` | `listProperties()` | Prints / returns every property with counts, types, samples. | no | no |
-| Open editor | `frontmatter-operator:open-frontmatter-operator` | (none) | Opens the table view. | no | no |
+| Open editor | `frontmatter-operator:open` | (none) | Opens the table view. | no | no |
 
 `api.describeActions()` returns the full machine-readable catalog: every parameter, its type, whether it is required, and a runnable example. Use it when wiring this plugin into a skill catalog or a schema-validated tool layer.
 
@@ -334,3 +334,14 @@ npm run build    # production bundle (type-check + esbuild)
 - `src/api/FrontmatterEditorAPI.ts`: the public, stable surface, including `describeActions()`.
 - `src/ui/FrontmatterEditorView.ts`: the table view (flow rail, WHEN bar, sortable filterable table, THEN action bar), with inline cell editing and live refresh.
 - `src/ui/modals/*` and `src/ui/settings/*`: one focused modal per action, plus the provider and prompt settings.
+
+## Privacy and data access
+
+- **Vault reads:** the plugin lists the vault's Markdown files and reads their frontmatter (via the metadata cache) to build the filter table and evaluate bulk-edit conditions. Note bodies are only read when you run the AI generator on selected notes.
+- **Vault writes:** only the frontmatter of notes you select is modified, and every write is snapshotted first so it can be undone.
+- **Clipboard:** used only for user-initiated copy actions: copying a provider configuration as JSON from the settings tab, and copying an OAuth device code during provider login.
+- **Network:** requests go only to the LLM providers you configure yourself (see [LLM providers](#llm-providers)). Without a configured provider, the plugin makes no network requests.
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).

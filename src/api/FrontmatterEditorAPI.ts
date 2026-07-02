@@ -14,7 +14,7 @@ import type {
   ValueMapping,
   ValueTransform,
 } from "../types";
-import { applyFilters, evaluateFilter } from "../services/FilterEngine";
+import { applyFilters } from "../services/FilterEngine";
 import { FILTER_OPERATORS } from "../types";
 import type { CleanupReport } from "../services/RefusalTagCleanupService";
 import type { DedupReport } from "../services/WikilinkDedupCleanupService";
@@ -158,8 +158,8 @@ export function validateNoteSelector(input: unknown): NoteSelector {
       conditions.push({
         property: c.property,
         operator: c.operator as FilterSpec["operator"],
-        value: c.value as string | undefined,
-        caseSensitive: c.caseSensitive as boolean | undefined,
+        value: c.value,
+        caseSensitive: c.caseSensitive,
       });
     }
     const combinator = s.combinator;
@@ -173,7 +173,7 @@ export function validateNoteSelector(input: unknown): NoteSelector {
     return {
       kind: "filter",
       conditions,
-      combinator: combinator as FilterCombinator | undefined,
+      combinator,
     };
   }
   throw new TypeError(
@@ -256,13 +256,13 @@ export class FrontmatterEditorAPI {
   }
 
   /** Scan the vault and return a property inventory. */
-  async scan(): Promise<ScanResult> {
-    return this.scanner.scan();
+  scan(): Promise<ScanResult> {
+    return Promise.resolve(this.scanner.scan());
   }
 
   /** List all frontmatter properties in the vault, sorted by usage count. */
-  async listProperties(): Promise<PropertyStat[]> {
-    return this.scanner.scan().properties;
+  listProperties(): Promise<PropertyStat[]> {
+    return Promise.resolve(this.scanner.scan().properties);
   }
 
   /**
@@ -477,19 +477,18 @@ export class FrontmatterEditorAPI {
     return ACTION_CATALOG;
   }
 
-  private async _selectorToRows(select: NoteSelector): Promise<NoteRow[]> {
+  private _selectorToRows(select: NoteSelector): Promise<NoteRow[]> {
     const validated = validateNoteSelector(select);
     const all = this.scanner.buildAllRows();
-    if (validated.kind === "all") return all;
+    if (validated.kind === "all") return Promise.resolve(all);
     if (validated.kind === "paths") {
       const set = new Set(validated.paths);
-      return all.filter((r) => set.has(r.path));
+      return Promise.resolve(all.filter((r) => set.has(r.path)));
     }
     const filters = validated.conditions.map(specToFilter);
     const combinator = validated.combinator ?? "AND";
     const filtered = applyFilters(all, filters, combinator);
-    if (combinator === "AND") return filtered;
-    return filtered;
+    return Promise.resolve(filtered);
   }
 }
 

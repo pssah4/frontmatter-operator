@@ -238,7 +238,9 @@ export class GenerateActionModal extends DraggableModal {
     const save = left.createEl("button", { cls: "fm-editor-btn" });
     setIcon(save.createSpan(), "bookmark-plus");
     save.createSpan({ text: "Save as custom prompt" });
-    save.addEventListener("click", () => this.saveAsCustomPrompt());
+    save.addEventListener("click", () => {
+      void this.saveAsCustomPrompt();
+    });
 
     this.statusEl = left.createDiv({ cls: "fm-editor-modal-status" });
 
@@ -248,7 +250,9 @@ export class GenerateActionModal extends DraggableModal {
     const run = right.createEl("button", { cls: "fm-editor-btn mod-cta" });
     setIcon(run.createSpan(), "sparkles");
     run.createSpan({ text: "Generate" });
-    run.addEventListener("click", () => this.runGeneration());
+    run.addEventListener("click", () => {
+      void this.runGeneration();
+    });
   }
 
   private renderInfoBubble(): void {

@@ -271,7 +271,7 @@ export class ValueMappingTable {
     popover.createSpan({ text: "Set target value to:" });
     const input = popover.createEl("input", {
       type: "text",
-      attr: { placeholder: "e.g. person" },
+      attr: { placeholder: "New value" },
     });
     this.mergeInput = input;
     const applyBtn = popover.createEl("button", {

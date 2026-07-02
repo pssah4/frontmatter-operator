@@ -37,6 +37,11 @@ function providerHasCredentials(p: ProviderConfig): boolean {
   return !!p.apiKey?.trim();
 }
 
+/** Guard an unknown JSON field down to a string; non-strings use the fallback. */
+function stringField(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
 export class FrontmatterEditorSettingsTab extends PluginSettingTab {
   constructor(app: App, private plugin: FrontmatterEditorPlugin) {
     super(app, plugin);
@@ -113,7 +118,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     if (providers.length === 0) {
       table.createDiv({
         cls: "model-table-empty",
-        text: "No providers configured yet. Click + Add provider below.",
+        text: "No providers configured yet. Click Add provider below.",
       });
     } else {
       for (const p of providers) this.renderProviderRow(table, p);
@@ -122,7 +127,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     const footer = containerEl.createDiv({ cls: "model-table-footer" });
     const addBtn = footer.createEl("button", {
       cls: "mod-cta model-add-btn",
-      text: "+ Add provider",
+      text: "Add provider",
     });
     addBtn.addEventListener("click", () => {
       new ProviderDetailModal(this.app, this.plugin, null, () =>
@@ -172,19 +177,21 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     });
     toggleInput.checked = provider.enabled;
     toggle.createSpan({ cls: "fm-toggle-track" });
-    toggleInput.addEventListener("change", async () => {
-      provider.enabled = toggleInput.checked;
-      // Disabling the active provider clears the default slot so the
-      // chat picker doesn't keep pointing at a disabled row -- same
-      // behavior as VO ProvidersTab.ts:178-191.
-      if (
-        !toggleInput.checked &&
-        this.plugin.settings.defaultProviderId === provider.id
-      ) {
-        this.plugin.settings.defaultProviderId = null;
-      }
-      await this.plugin.saveSettings();
-      this.display();
+    toggleInput.addEventListener("change", () => {
+      void (async () => {
+        provider.enabled = toggleInput.checked;
+        // Disabling the active provider clears the default slot so the
+        // chat picker doesn't keep pointing at a disabled row -- same
+        // behavior as VO ProvidersTab.ts:178-191.
+        if (
+          !toggleInput.checked &&
+          this.plugin.settings.defaultProviderId === provider.id
+        ) {
+          this.plugin.settings.defaultProviderId = null;
+        }
+        await this.plugin.saveSettings();
+        this.display();
+      })();
     });
 
     // ---- Default radio (single-pick across all rows) ----
@@ -194,12 +201,14 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     });
     defaultRadio.checked = isActive;
     defaultRadio.disabled = !provider.enabled;
-    defaultRadio.addEventListener("change", async () => {
-      if (defaultRadio.checked) {
-        this.plugin.settings.defaultProviderId = provider.id;
-        await this.plugin.saveSettings();
-        this.display();
-      }
+    defaultRadio.addEventListener("change", () => {
+      void (async () => {
+        if (defaultRadio.checked) {
+          this.plugin.settings.defaultProviderId = provider.id;
+          await this.plugin.saveSettings();
+          this.display();
+        }
+      })();
     });
 
     // ---- Actions: gear (configure) + trash (remove) ----
@@ -219,24 +228,26 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
       attr: { title: "Remove" },
     });
     setIcon(delBtn, "trash");
-    delBtn.addEventListener("click", async () => {
-      const ok = await confirmModal(this.app, {
-        title: "Remove provider?",
-        message: `Remove provider "${provider.displayName || PROVIDER_LABELS[provider.type]}"? This clears its configuration.`,
-        confirmLabel: "Remove",
-        cancelLabel: "Cancel",
-        destructive: true,
-      });
-      if (!ok) return;
-      this.plugin.settings.providers = this.plugin.settings.providers.filter(
-        (p) => p.id !== provider.id,
-      );
-      if (this.plugin.settings.defaultProviderId === provider.id) {
-        this.plugin.settings.defaultProviderId =
-          this.plugin.settings.providers.find((p) => p.enabled)?.id ?? null;
-      }
-      await this.plugin.saveSettings();
-      this.display();
+    delBtn.addEventListener("click", () => {
+      void (async () => {
+        const ok = await confirmModal(this.app, {
+          title: "Remove provider?",
+          message: `Remove provider "${provider.displayName || PROVIDER_LABELS[provider.type]}"? This clears its configuration.`,
+          confirmLabel: "Remove",
+          cancelLabel: "Cancel",
+          destructive: true,
+        });
+        if (!ok) return;
+        this.plugin.settings.providers = this.plugin.settings.providers.filter(
+          (p) => p.id !== provider.id,
+        );
+        if (this.plugin.settings.defaultProviderId === provider.id) {
+          this.plugin.settings.defaultProviderId =
+            this.plugin.settings.providers.find((p) => p.enabled)?.id ?? null;
+        }
+        await this.plugin.saveSettings();
+        this.display();
+      })();
     });
   }
 
@@ -355,13 +366,14 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
         description: preset.description,
         enabled: preset.enabled !== false,
         onEdit: () => this.editPreset(preset),
-        onExport: () =>
-          this.exportPrompt(
+        onExport: () => {
+          void this.exportPrompt(
             preset.displayName,
             preset.targetProperty,
             preset.parser,
             preset.prompts[lang],
-          ),
+          );
+        },
         onDelete: () => this.deletePreset(preset),
         onToggle: async (enabled) => {
           preset.enabled = enabled;
@@ -375,8 +387,9 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
         target: tpl.targetProperty,
         enabled: tpl.enabled !== false,
         onEdit: () => this.editCustom(tpl),
-        onExport: () =>
-          this.exportPrompt(tpl.name, tpl.targetProperty, tpl.parser, tpl.prompt),
+        onExport: () => {
+          void this.exportPrompt(tpl.name, tpl.targetProperty, tpl.parser, tpl.prompt);
+        },
         onDelete: () => this.deleteCustom(tpl),
         onToggle: async (enabled) => {
           tpl.enabled = enabled;
@@ -394,12 +407,16 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
         cls: "fm-editor-btn fm-editor-prompt-restore",
         text: `Restore ${missing.length} built-in prompt${missing.length === 1 ? "" : "s"}`,
       });
-      restore.addEventListener("click", async () => {
-        for (const dp of missing) {
-          this.plugin.settings.presets.push(JSON.parse(JSON.stringify(dp)));
-        }
-        await this.plugin.saveSettings();
-        this.display();
+      restore.addEventListener("click", () => {
+        void (async () => {
+          for (const dp of missing) {
+            this.plugin.settings.presets.push(
+              JSON.parse(JSON.stringify(dp)) as GeneratorPreset,
+            );
+          }
+          await this.plugin.saveSettings();
+          this.display();
+        })();
       });
     }
   }
@@ -485,17 +502,17 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
     if (!json) return;
     try {
       const obj = JSON.parse(json) as Record<string, unknown>;
-      const target = String(obj.targetProperty ?? "");
+      const target = stringField(obj.targetProperty);
       const tpl = emptyCustomPrompt(target);
-      tpl.name = String(obj.name ?? "Imported prompt");
+      tpl.name = stringField(obj.name, "Imported prompt");
       tpl.targetProperty = target;
-      const parser = String(obj.parser ?? "");
+      const parser = stringField(obj.parser);
       tpl.parser = (
         ["single_line_text", "list_string", "moc_topics_concepts"].includes(parser)
           ? parser
           : "single_line_text"
       ) as GeneratorParserId;
-      tpl.prompt = String(obj.prompt ?? "");
+      tpl.prompt = stringField(obj.prompt);
       this.plugin.settings.customPrompts.push(tpl);
       await this.plugin.saveSettings();
       this.display();
@@ -526,7 +543,7 @@ export class FrontmatterEditorSettingsTab extends PluginSettingTab {
             if (idx >= 0) {
               this.plugin.settings.presets[idx] = JSON.parse(
                 JSON.stringify(fresh),
-              );
+              ) as GeneratorPreset;
               await this.plugin.saveSettings();
               this.display();
               new Notice(`Reset "${fresh.displayName}"`);

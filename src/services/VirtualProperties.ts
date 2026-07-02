@@ -109,7 +109,7 @@ export const VirtualProperties = {
         count: rowCount,
         sampleValues: [],
         types,
-      } as PropertyStat;
+      };
     });
   },
 };

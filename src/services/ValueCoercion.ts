@@ -27,7 +27,7 @@ export function resolveTemplate(template: string, fm: Frontmatter): FmValue {
     const v = fm[key];
     return v === undefined ? null : v;
   }
-  return template.replace(ANY_TEMPLATE_RE, (_match, key) => {
+  return template.replace(ANY_TEMPLATE_RE, (_match, key: string) => {
     const v = fm[key.trim()];
     if (v === undefined || v === null) return "";
     if (Array.isArray(v)) return v.map((x) => String(x)).join(", ");
@@ -68,8 +68,8 @@ export function parseValue(raw: string, kind: ValueKind = "auto"): FmValue {
   if (trimmed.startsWith("[[") && trimmed.endsWith("]]")) return trimmed;
   if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
     try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed;
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed as FmValue;
     } catch {
       /* fall through */
     }
@@ -124,7 +124,7 @@ export function splitList(raw: string): string[] {
 export function wrapAsWikilink(value: FmValue): FmValue {
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) {
-    return value.map((item) => wrapAsWikilink(item) as never) as FmValue;
+    return value.map((item) => wrapAsWikilink(item) as never);
   }
   if (typeof value !== "string") return value;
   const trimmed = value.trim();

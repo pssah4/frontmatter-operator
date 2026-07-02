@@ -2,7 +2,6 @@ import { requestUrl } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
 import type { ProviderConfig, ProviderType } from "../types/llm";
 import { DEFAULT_BASE_URLS, MODEL_SUGGESTIONS } from "../types/llm";
-import { signSigV4 } from "../auth/AwsSigV4";
 import { assertSafeProviderUrl } from "./providerUrlGuard";
 
 export interface FetchedModel {
@@ -769,7 +768,7 @@ function groupForBedrockId(id: string, fallback: string): string {
  */
 export function scrubAwsError(text: string): string {
   if (!text) return "";
-  let scrubbed = text
+  const scrubbed = text
     .replace(/Credential=[^,\s]+/g, "Credential=<redacted>")
     .replace(/Signature=[a-f0-9]+/gi, "Signature=<redacted>")
     .replace(/x-amz-security-token:[^\n]+/gi, "x-amz-security-token:<redacted>")

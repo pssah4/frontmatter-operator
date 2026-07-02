@@ -104,7 +104,8 @@ function renderDisplayMode(
   }
   if (value === null) {
     parent.addClass("fm-editor-cell-null");
-    parent.setText("null");
+    // Renders the literal YAML value ("null"), not UI copy.
+    parent.setText(String(value));
     return;
   }
   if (typeof value === "boolean") {
@@ -174,6 +175,7 @@ function toStringArray(current: FmValue | undefined): string[] {
       .filter((v) => v != null)
       .map((v) => (typeof v === "string" ? v : String(v)));
   }
+  if (typeof current === "object") return [JSON.stringify(current)];
   const s = typeof current === "string" ? current : String(current);
   return s.trim() === "" ? [] : [s];
 }
@@ -213,7 +215,7 @@ function enterEditMode(
     return;
   }
   if (current && typeof current === "object") {
-    bindObjectEditor(wrap, td, current as Record<string, unknown>, handlers);
+    bindObjectEditor(wrap, td, current, handlers);
     return;
   }
 
@@ -285,7 +287,7 @@ function bindStringEditor(
   const cancel = () => {
     if (committed) return;
     committed = true;
-    exitEditMode(td, initial === "" ? undefined : (initial as FmValue), handlers);
+    exitEditMode(td, initial === "" ? undefined : initial, handlers);
   };
   input.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
@@ -519,7 +521,7 @@ function bindObjectEditor(
   const cancel = () => {
     if (committed) return;
     committed = true;
-    exitEditMode(td, initial as FmValue, handlers);
+    exitEditMode(td, initial, handlers);
   };
   ta.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {

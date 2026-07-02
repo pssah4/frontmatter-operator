@@ -109,7 +109,7 @@ export class HelpModal extends DraggableModal {
     const { contentEl, titleEl } = this;
     contentEl.empty();
     contentEl.addClass("fm-editor-modal-content");
-    titleEl.setText("How to use Frontmatter Operator");
+    titleEl.setText("How to use this plugin");
 
     contentEl.createDiv({
       cls: "fm-editor-help-intro",

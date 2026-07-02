@@ -16,7 +16,7 @@
 
 import { TFile, type App } from "obsidian";
 import type { SnapshotService } from "./SnapshotService";
-import type { Frontmatter } from "../types";
+import type { FmValue, Frontmatter } from "../types";
 import { dedupeWikilinkValue, type LinkResolver } from "./WikilinkDedup";
 import { triggerBatchEvent, FM_BATCH_START, FM_BATCH_END } from "../batchEvents";
 
@@ -80,7 +80,8 @@ export class WikilinkDedupCleanupService {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       opts.onProgress?.(i + 1, files.length, file);
-      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const fm: Frontmatter | undefined =
+        this.app.metadataCache.getFileCache(file)?.frontmatter;
       if (!fm) continue;
 
       // Resolution is anchored at the note that holds the link, so a
@@ -144,10 +145,10 @@ export class WikilinkDedupCleanupService {
 
     for (const { file, patches } of writeQueue) {
       try {
-        await this.app.fileManager.processFrontMatter(file, (fm) => {
+        await this.app.fileManager.processFrontMatter(file, (fm: Frontmatter) => {
           for (const patch of patches) {
             if (UNSAFE_KEYS.has(patch.property)) continue;
-            fm[patch.property] = patch.nextValue as never;
+            fm[patch.property] = patch.nextValue as FmValue;
           }
         });
       } catch (err) {

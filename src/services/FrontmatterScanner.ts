@@ -1,5 +1,11 @@
 import type { App, TFile } from "obsidian";
-import type { Frontmatter, NoteRow, PropertyStat, ScanResult } from "../types";
+import type {
+  FmValue,
+  Frontmatter,
+  NoteRow,
+  PropertyStat,
+  ScanResult,
+} from "../types";
 
 const SAMPLE_LIMIT = 8;
 
@@ -15,7 +21,7 @@ function valueType(
   return "string";
 }
 
-function stringifySample(v: unknown): string {
+function stringifySample(v: FmValue | undefined): string {
   if (v === null || v === undefined) return "null";
   if (Array.isArray(v))
     return "[" + v.slice(0, 3).map((x) => stringifySample(x)).join(", ") + "]";
@@ -118,7 +124,7 @@ export class FrontmatterScanner {
           counter.set(s, (counter.get(s) ?? 0) + 1);
         }
       } else {
-        const s = typeof v === "string" ? v : String(v);
+        const s = typeof v === "object" ? JSON.stringify(v) : String(v);
         counter.set(s, (counter.get(s) ?? 0) + 1);
       }
     }

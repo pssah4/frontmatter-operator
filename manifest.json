@@ -1,8 +1,8 @@
 {
   "id": "frontmatter-operator",
   "name": "Frontmatter Operator",
-  "version": "1.0.0",
-  "minAppVersion": "1.7.2",
+  "version": "1.0.1",
+  "minAppVersion": "1.8.7",
   "description": "Bulk-edit YAML frontmatter across the vault: filter notes by property, then set, rename, copy, merge or delete properties with snapshot-based undo. Ideal for OKF (Open Knowledge Format) migration; exposes a typed API for AI agents.",
   "author": "Sebastian Hanke",
   "authorUrl": "https://github.com/pssah4",

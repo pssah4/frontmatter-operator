@@ -96,7 +96,7 @@ export class FrontmatterEditorView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "Frontmatter Operator";
+    return "Frontmatter operator";
   }
 
   getIcon(): string {
@@ -123,7 +123,7 @@ export class FrontmatterEditorView extends ItemView {
     );
   }
 
-  async onClose(): Promise<void> {
+  onClose(): Promise<void> {
     this.closed = true;
     if (this.refreshTimer !== null) {
       window.clearTimeout(this.refreshTimer);
@@ -133,6 +133,7 @@ export class FrontmatterEditorView extends ItemView {
     this.activeColMenu?.close();
     this.activeColPopover?.close();
     this.containerEl.removeClass("fm-editor-root");
+    return Promise.resolve();
   }
 
   /**
@@ -161,7 +162,7 @@ export class FrontmatterEditorView extends ItemView {
     }
   }
 
-  async refreshScan(): Promise<void> {
+  refreshScan(): Promise<void> {
     const scan = this.plugin.scanner.scan();
     this.allRows = this.plugin.scanner.buildAllRows();
     // Virtuals (Folder / Filename / Extension) sit at the top of the
@@ -185,6 +186,7 @@ export class FrontmatterEditorView extends ItemView {
       );
     }
     this.recomputeFilteredRows();
+    return Promise.resolve();
   }
 
   /**
@@ -316,7 +318,7 @@ export class FrontmatterEditorView extends ItemView {
 
   private scrollToSelector(selector: string): void {
     const root = this.containerEl.children[1] as HTMLElement;
-    const el = root.querySelector(selector) as HTMLElement | null;
+    const el = root.querySelector(selector);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -496,9 +498,9 @@ export class FrontmatterEditorView extends ItemView {
         const oldAnchor = this.activePropertyPickerAnchor;
         if (oldAnchor && !this.containerEl.contains(oldAnchor)) {
           const root = this.containerEl.children[1] as HTMLElement;
-          const freshAdd = root?.querySelector(
+          const freshAdd = root?.querySelector<HTMLElement>(
             ".fm-editor-col-add-btn",
-          ) as HTMLElement | null;
+          );
           if (freshAdd) {
             this.activePropertyPickerAnchor = freshAdd;
             popover.reanchorTo(freshAdd);
@@ -534,8 +536,8 @@ export class FrontmatterEditorView extends ItemView {
     }
     const wrap = old.querySelector(".fm-editor-table-wrap");
     if (wrap) this.tableScrollTop = (wrap as HTMLElement).scrollTop;
-    const host = activeDocument.createElement("div");
-    this.renderTableSection(host as unknown as HTMLElement);
+    const host = createDiv();
+    this.renderTableSection(host);
     const fresh = host.firstElementChild;
     if (fresh) old.parentElement.insertBefore(fresh, old);
     old.remove();
@@ -580,11 +582,12 @@ export class FrontmatterEditorView extends ItemView {
           const del = item.createEl("button", { cls: "fm-editor-views-del" });
           setIcon(del, "trash-2");
           del.title = "Delete this view";
-          del.addEventListener("click", async (ev) => {
+          del.addEventListener("click", (ev) => {
             ev.stopPropagation();
-            await this.deleteView(v.id);
-            build(menu);
-            this.activeColMenu?.reposition();
+            void this.deleteView(v.id).then(() => {
+              build(menu);
+              this.activeColMenu?.reposition();
+            });
           });
         }
       }
@@ -629,11 +632,9 @@ export class FrontmatterEditorView extends ItemView {
     });
     this.activeColMenu = handle;
     window.setTimeout(() => {
-      (
-        handle.el.querySelector(
-          ".fm-editor-views-save-row input",
-        ) as HTMLInputElement | null
-      )?.focus();
+      handle.el
+        .querySelector<HTMLInputElement>(".fm-editor-views-save-row input")
+        ?.focus();
     }, 0);
     close = () => handle.close();
   }
@@ -703,8 +704,8 @@ export class FrontmatterEditorView extends ItemView {
     // Build the new section into a detached fragment first so we can
     // swap atomically and preserve sibling order (the rule summary,
     // table, action bar must stay below the WHEN section).
-    const host = activeDocument.createElement("div");
-    this.renderWhenBar(host as unknown as HTMLElement);
+    const host = createDiv();
+    this.renderWhenBar(host);
     const fresh = host.firstElementChild;
     if (fresh) parent.insertBefore(fresh, old);
     old.remove();
@@ -811,7 +812,7 @@ export class FrontmatterEditorView extends ItemView {
 
     // Operator cell -- styled as the regular operator <select> would
     // be (matches .fm-editor-condition-op).
-    const opEl = row.createEl("span", {
+    const opEl = row.createSpan({
       cls: "fm-editor-condition-op fm-editor-condition-op-static",
     });
     opEl.setText(this.selectedPaths.size === 1 ? "equals" : "in");
@@ -1366,13 +1367,16 @@ export class FrontmatterEditorView extends ItemView {
       return;
     }
     try {
-      await this.app.fileManager.processFrontMatter(file, (fm) => {
-        if (next === undefined) {
-          delete fm[property];
-        } else {
-          fm[property] = next;
-        }
-      });
+      await this.app.fileManager.processFrontMatter(
+        file,
+        (fm: Record<string, unknown>) => {
+          if (next === undefined) {
+            delete fm[property];
+          } else {
+            fm[property] = next;
+          }
+        },
+      );
     } catch (err) {
       new Notice(
         `Save failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1410,11 +1414,9 @@ export class FrontmatterEditorView extends ItemView {
       if (col.filter && !existingDot) {
         const label = th.querySelector(".fm-editor-col-head-label");
         if (label) {
-          const dot = activeDocument.createElement("span");
-          dot.className = "fm-editor-col-filter-dot";
+          const dot = label.createSpan({ cls: "fm-editor-col-filter-dot" });
           setIcon(dot, "dot");
           dot.title = "Filter active";
-          label.appendChild(dot);
         }
       } else if (!col.filter && existingDot) {
         existingDot.remove();
@@ -2064,6 +2066,12 @@ function humanOp(op: FilterOperator): string {
   }
 }
 
+function comparableString(v: unknown): string {
+  if (Array.isArray(v)) return v.join(", ");
+  if (typeof v === "object" && v !== null) return JSON.stringify(v);
+  return String(v);
+}
+
 function compareValues(a: unknown, b: unknown): number {
   const aMissing = a === undefined || a === null;
   const bMissing = b === undefined || b === null;
@@ -2074,8 +2082,8 @@ function compareValues(a: unknown, b: unknown): number {
   if (typeof a === "boolean" && typeof b === "boolean") {
     return a === b ? 0 : a ? 1 : -1;
   }
-  const as = Array.isArray(a) ? a.join(", ") : String(a);
-  const bs = Array.isArray(b) ? b.join(", ") : String(b);
+  const as = comparableString(a);
+  const bs = comparableString(b);
   return as.localeCompare(bs, undefined, { numeric: true });
 }
 

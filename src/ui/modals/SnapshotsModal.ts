@@ -57,20 +57,8 @@ export class SnapshotsModal extends DraggableModal {
     });
     setIcon(restoreBtn.createSpan(), "undo-2");
     restoreBtn.createSpan({ text: "Restore" });
-    restoreBtn.addEventListener("click", async () => {
-      const proceed = await confirmModal(this.app, {
-        title: "Restore snapshot?",
-        message: `Restore ${snap.entries.length} note${snap.entries.length === 1 ? "" : "s"} to the state before "${describeAction(snap.action)}".`,
-        confirmLabel: "Restore",
-        cancelLabel: "Cancel",
-      });
-      if (!proceed) return;
-      const result = await this.plugin.bulk.restoreSnapshot(snap);
-      new Notice(
-        `Restore: ${result.successCount} restored, ${result.errorCount} errors`,
-      );
-      this.onChange();
-      this.close();
+    restoreBtn.addEventListener("click", () => {
+      void this.handleRestore(snap);
     });
 
     const delBtn = actions.createEl("button", {
@@ -78,19 +66,39 @@ export class SnapshotsModal extends DraggableModal {
     });
     setIcon(delBtn, "trash-2");
     delBtn.title = "Delete this snapshot";
-    delBtn.addEventListener("click", async () => {
-      const proceed = await confirmModal(this.app, {
-        title: "Delete snapshot?",
-        message: "This removes the snapshot file. You won't be able to restore from it.",
-        confirmLabel: "Delete",
-        cancelLabel: "Cancel",
-        destructive: true,
-      });
-      if (!proceed) return;
-      await this.plugin.snapshots.delete(snap.id);
-      new Notice("Snapshot deleted");
-      row.remove();
+    delBtn.addEventListener("click", () => {
+      void this.handleDelete(snap, row);
     });
+  }
+
+  private async handleRestore(snap: Snapshot): Promise<void> {
+    const proceed = await confirmModal(this.app, {
+      title: "Restore snapshot?",
+      message: `Restore ${snap.entries.length} note${snap.entries.length === 1 ? "" : "s"} to the state before "${describeAction(snap.action)}".`,
+      confirmLabel: "Restore",
+      cancelLabel: "Cancel",
+    });
+    if (!proceed) return;
+    const result = await this.plugin.bulk.restoreSnapshot(snap);
+    new Notice(
+      `Restore: ${result.successCount} restored, ${result.errorCount} errors`,
+    );
+    this.onChange();
+    this.close();
+  }
+
+  private async handleDelete(snap: Snapshot, row: HTMLElement): Promise<void> {
+    const proceed = await confirmModal(this.app, {
+      title: "Delete snapshot?",
+      message: "This removes the snapshot file. You won't be able to restore from it.",
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!proceed) return;
+    await this.plugin.snapshots.delete(snap.id);
+    new Notice("Snapshot deleted");
+    row.remove();
   }
 
   onClose(): void {

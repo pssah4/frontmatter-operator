@@ -1,4 +1,4 @@
-import { Notice, requestUrl } from "obsidian";
+import { requestUrl } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
 import { startLoopbackServer } from "./PkceLoopbackServer";
 import { openExternal } from "./openExternal";
@@ -311,9 +311,9 @@ function raceWithAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
         signal.removeEventListener("abort", onAbort);
         resolve(v);
       },
-      (e) => {
+      (e: unknown) => {
         signal.removeEventListener("abort", onAbort);
-        reject(e);
+        reject(e instanceof Error ? e : new Error(String(e)));
       },
     );
   });

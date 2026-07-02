@@ -1,4 +1,4 @@
-import { Notice, requestUrl } from "obsidian";
+import { requestUrl } from "obsidian";
 import type FrontmatterEditorPlugin from "../main";
 
 /**
